@@ -1,0 +1,12 @@
+# 本地环境与 Python 缓存
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# 可由数据管线或训练重新生成的大文件及报告
+data/processed/
+data/pretrained/
+reports/
+runs/

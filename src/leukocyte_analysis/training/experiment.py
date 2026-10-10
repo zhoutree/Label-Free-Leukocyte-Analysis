@@ -1,0 +1,70 @@
+"""配置 Lightning 训练器、标准日志和最佳模型检查点。"""
+
+from pathlib import Path
+
+import lightning as L
+import torch
+from lightning.pytorch.callbacks import ModelCheckpoint
+from lightning.pytorch.loggers import CSVLogger, TensorBoardLogger
+from torch import nn
+from torch.utils.data import DataLoader
+
+from .module import LeukocyteClassifier
+
+
+def run_training(
+    backbone: nn.Module,
+    train_loader: DataLoader,
+    val_loader: DataLoader,
+    class_weights: torch.Tensor,
+    device: torch.device,
+    epochs: int,
+    output_dir: Path,
+    learning_rate: float,
+    weight_decay: float,
+    smoke_test: bool = False,
+) -> None:
+    """按验证 macro-F1 选最佳权重；冒烟模式只运行两批且不保存文件。"""
+    module = LeukocyteClassifier(backbone, class_weights, learning_rate, weight_decay)
+    checkpoint = None
+    if smoke_test:
+        loggers = False
+        callbacks = []
+    else:
+        output_dir.mkdir(parents=True, exist_ok=False)
+        # 两种日志由 Lightning 管理，不再手写 CSV 和 TensorBoard 事件。
+        loggers = [
+            TensorBoardLogger(output_dir, name="tensorboard", version="", default_hp_metric=False),
+            CSVLogger(output_dir, name="csv", version=""),
+        ]
+        checkpoint = ModelCheckpoint(
+            dirpath=output_dir / "checkpoints",
+            filename="best",
+            monitor="val_macro_f1",
+            mode="max",
+            save_top_k=1,
+            save_last=True,
+            save_on_exception=True,
+            enable_version_counter=False,
+        )
+        callbacks = [checkpoint]
+
+    trainer = L.Trainer(
+        accelerator="gpu" if device.type == "cuda" else "cpu",
+        devices=1,
+        max_epochs=epochs,
+        default_root_dir=output_dir,
+        logger=loggers,
+        callbacks=callbacks,
+        enable_checkpointing=not smoke_test,
+        fast_dev_run=2 if smoke_test else False,
+        num_sanity_val_steps=0,
+        log_every_n_steps=1,
+        enable_model_summary=False,
+    )
+    trainer.fit(module, train_dataloaders=train_loader, val_dataloaders=val_loader)
+    if smoke_test:
+        print("冒烟测试通过：训练和验证各执行了两批，未保存权重。")
+    else:
+        print("最佳验证 macro-F1：", checkpoint.best_model_score,
+              "检查点：", checkpoint.best_model_path)

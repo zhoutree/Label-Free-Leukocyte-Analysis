@@ -1,0 +1,22 @@
+name: label-free-leukocyte
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  - python=3.14
+  - pip
+  - pip:
+      - --index-url https://pypi.org/simple
+      - --extra-index-url https://download.pytorch.org/whl/cu132
+      # 仅固定 PyTorch 的 CUDA 构建配对，避免解析到 CPU 包或不匹配的 torchvision。
+      - torch==2.14.1+cu132
+      - torchvision==0.29.1+cu132
+      - numpy
+      - pillow
+      - tifffile
+      - lightning
+      - torchmetrics
+      - tensorboard
+      - scikit-learn
+      - matplotlib
+      - scipy

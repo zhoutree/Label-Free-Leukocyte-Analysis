@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "label-free-leukocyte-analysis"
+version = "0.1.0"
+description = "Label-free brightfield leukocyte classification experiments"
+readme = "README.md"
+requires-python = ">=3.10"
+
+[project.scripts]
+leukocyte-train = "leukocyte_analysis.train:main"
+leukocyte-evaluate = "leukocyte_analysis.evaluate:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
