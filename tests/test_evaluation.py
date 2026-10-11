@@ -1,5 +1,6 @@
 """只使用合成细胞验证独立评估，不读取保留的真实测试集。"""
 
+import csv
 import tempfile
 import unittest
 from pathlib import Path
@@ -26,6 +27,13 @@ class SyntheticCells:
         ])
         self.samples = [(index, label, "synthetic")
                         for index, label in enumerate(self.labels)]
+        raw_labels = ("B", "eosinophil", "monocyte", "neutrophil")
+        self.source_by_index = {
+            index: {"file": f"synthetic/{raw_labels[label]}/batch1/ch5_1.tif",
+                    "donor": "synthetic", "source_label": raw_labels[label],
+                    "row": index, "col": 0}
+            for index, label in enumerate(self.labels)
+        }
 
     def __len__(self) -> int:
         return len(self.labels)
@@ -75,9 +83,18 @@ class TestEvaluation(unittest.TestCase):
             self.assertEqual(summary["class_names"], list(CLASS_NAMES))
             for name in ("test_metrics.json", "test_classification_report.txt",
                          "test_per_class_metrics.csv",
-                         "test_predictions.csv", "confusion_matrix_counts.png",
+                         "test_predictions.csv", "test_misclassified.csv",
+                         "confusion_matrix_counts.png",
                          "confusion_matrix_row_normalized.png", "misclassified_examples.png"):
                 self.assertGreater((output / name).stat().st_size, 0)
+            with (output / "test_misclassified.csv").open(newline="", encoding="utf-8") as handle:
+                errors = list(csv.DictReader(handle))
+            self.assertEqual(len(errors), 1)
+            self.assertEqual(errors[0]["packed_index"], "2")
+            self.assertEqual(errors[0]["source_label"], "monocyte")
+            self.assertEqual(errors[0]["true_label"], "monocyte")
+            self.assertEqual(errors[0]["predicted_label"], "eosinophil")
+            self.assertEqual(errors[0]["row"], "2")
             with self.assertRaises(FileExistsError):
                 output.mkdir(exist_ok=False)
 

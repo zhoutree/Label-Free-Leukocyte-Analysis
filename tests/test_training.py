@@ -61,8 +61,11 @@ class TestTrainingConfiguration(unittest.TestCase):
             dataset = LeukocyteDataset(split_csv, tiles_npy, stats_json, "train")
             self.assertEqual([row[1] for row in dataset.samples], [0, 0, 1, 3])
             self.assertEqual(tuple(dataset[0][0].shape), (1, 55, 55))
+            indexed = LeukocyteDataset(split_csv, tiles_npy, stats_json, "train",
+                                       include_index=True)
+            self.assertEqual(indexed[2][1:], (1, 2))
             # np.load(mmap_mode="r") 在 Windows 上需释放映射才能清理临时文件。
-            del dataset
+            del dataset, indexed
 
     def test_random_initialization_can_be_selected(self) -> None:
         with patch.object(sys, "argv", ["leukocyte-train", "--init", "random", "--weight-decay", "0"]):

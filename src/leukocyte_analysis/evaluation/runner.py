@@ -16,6 +16,7 @@ from ..data.dataset import LeukocyteDataset
 from ..models.resnet import build_resnet18
 from ..training.module import LeukocyteClassifier
 from ..training.progress import CompactRichProgressBar, prepare_console_output
+from .error_records import ERROR_FIELDS, misclassified_rows, write_csv
 from .plots import save_confusion_matrices, save_error_examples
 
 
@@ -118,6 +119,9 @@ def _write_report(dataset: LeukocyteDataset, predictions: list[dict], output_dir
         writer = csv.DictWriter(file, fieldnames=list(predictions[0]))
         writer.writeheader()
         writer.writerows(predictions)
+    # 完整预测用于重算指标；错分表额外保留原始文件和网格坐标。
+    errors = misclassified_rows(dataset, predictions, "test")
+    write_csv(output_dir / "test_misclassified.csv", errors, ERROR_FIELDS)
     save_confusion_matrices(y_true, y_pred, output_dir, class_names)
     save_error_examples(dataset, predictions, output_dir / "misclassified_examples.png", class_names)
     return summary

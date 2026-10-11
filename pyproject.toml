@@ -12,6 +12,7 @@ requires-python = ">=3.10"
 [project.scripts]
 leukocyte-train = "leukocyte_analysis.train:main"
 leukocyte-evaluate = "leukocyte_analysis.evaluate:main"
+leukocyte-record-errors = "leukocyte_analysis.record_errors:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

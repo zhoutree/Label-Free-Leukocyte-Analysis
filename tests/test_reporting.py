@@ -14,6 +14,7 @@ from torch.utils.data import DataLoader, TensorDataset
 
 from leukocyte_analysis.data.bbbc045_config import CLASS_NAMES
 from leukocyte_analysis.training.experiment import run_training
+from leukocyte_analysis.training.error_logging import ValidationErrorLogger
 from leukocyte_analysis.evaluation.runner import load_classifier
 
 
@@ -52,6 +53,49 @@ class TestReporting(unittest.TestCase):
         early_stop = next(item for item in callbacks if isinstance(item, EarlyStopping))
         self.assertEqual(early_stop.monitor, "val_macro_f1")
         self.assertEqual(early_stop.patience, 5)
+
+    def test_indexed_validation_loader_gets_error_callback(self) -> None:
+        images = torch.zeros(4, 1)
+        targets = torch.arange(4)
+        train_loader = DataLoader(TensorDataset(images, targets), batch_size=4)
+        val_dataset = TensorDataset(images, targets)
+        val_dataset.include_index = True
+        val_loader = DataLoader(val_dataset, batch_size=4)
+        with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent) as temporary:
+            with patch("leukocyte_analysis.training.experiment.L.Trainer") as trainer:
+                run_training(nn.Linear(1, 4), train_loader, val_loader,
+                             torch.ones(4), torch.device("cpu"), 1,
+                             Path(temporary) / "run", 0.01, 0.0)
+        callbacks = trainer.call_args.kwargs["callbacks"]
+        self.assertTrue(any(isinstance(item, ValidationErrorLogger) for item in callbacks))
+
+    def test_indexed_validation_run_writes_error_records(self) -> None:
+        # 真实 Lightning 循环 + 合成数据，核对回调和模型步骤能协同工作。
+        images = torch.zeros(4, 1)
+        targets = torch.arange(4)
+        train_loader = DataLoader(TensorDataset(images, targets), batch_size=4)
+        val_dataset = TensorDataset(images, targets, torch.arange(4))
+        val_dataset.include_index = True
+        val_dataset.class_names = CLASS_NAMES
+        raw_labels = ("B", "eosinophil", "monocyte", "neutrophil")
+        val_dataset.source_by_index = {
+            index: {"file": f"synthetic/{label}/batch1/ch5_1.tif",
+                    "donor": "synthetic", "source_label": label,
+                    "row": index, "col": 0}
+            for index, label in enumerate(raw_labels)
+        }
+        with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent) as temporary:
+            output = Path(temporary) / "run"
+            run_training(nn.Linear(1, 4), train_loader,
+                         DataLoader(val_dataset, batch_size=4), torch.ones(4),
+                         torch.device("cpu"), 1, output, 0.01, 0.0)
+            error_dir = output / "validation_errors"
+            self.assertTrue((error_dir / "epoch_000.csv").exists())
+            self.assertTrue((error_dir / "frequency.csv").exists())
+            with (error_dir / "epoch_000.csv").open(newline="", encoding="utf-8") as handle:
+                errors = list(csv.DictReader(handle))
+            self.assertGreater(len(errors), 0)
+            self.assertTrue(all(row["split"] == "val" for row in errors))
 
     def test_one_epoch_writes_comparable_losses_and_curves(self) -> None:
         # 四类各两个样本，避免借用正式数据或启动完整 ResNet 训练。

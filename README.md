@@ -14,14 +14,19 @@ src/leukocyte_analysis/
   evaluation/                   独立测试推理、指标和图像报告
   train.py                      命令行入口
   evaluate.py                   训练完成后的测试集评估入口
+  record_errors.py              从预测文件或检查点导出可定位的错分记录
 data/processed/                 已处理图块、清单、划分和训练集统计
 data/pretrained/                官方预训练权重缓存（初次下载后复用）
 reports/                        审计结果及预览图
 runs/                           每次完整训练生成的权重和指标（初始不存在）
+docs/                           对已完成实验的分析记录，不参与训练
+scripts/                        针对已完成实验的一次性核查脚本
 tests/                          不依赖完整数据集的自动化测试
 ```
 
 `src/leukocyte_analysis/data/` 存放**处理数据的代码**；项目根目录的 `data/` 存放**数据文件**。原始 TIFF 仍在项目外的 `../Stained_Montages/`，没有复制或修改。
+
+`scripts/` 中的历史核查脚本绑定了特定运行目录，用于复核 [测试集异常记录](docs/bbbc045_test_audit.md) 及训练集错分聚集，不是通用训练入口；其输出保存在已忽略的 `runs/` 或 `reports/` 中。
 
 ## 当前数据
 
@@ -73,9 +78,24 @@ $checkpoint = Read-Host "请粘贴选定实验的 best.ckpt 完整路径"
 python -m leukocyte_analysis.evaluate --checkpoint $checkpoint
 ```
 
-测试集批量推理由 Lightning 的 `Trainer.predict()` 管理；分类指标和混淆矩阵交给 scikit-learn。默认在该实验目录下新建 `test_evaluation/`，生成 `test_metrics.json`、各类别 precision/recall/F1 的文本与 CSV 表、逐细胞预测 CSV、计数及按真实类别归一化的混淆矩阵，以及每类最多三张高置信度错分示例图。示例图的 1–99% 逐图对比度拉伸**只用于观看**，不影响推理。若报告目录已存在，命令会拒绝覆盖，避免误把多次测试当成独立验证。该测试集仅含两名保留受试者，指标不能替代跨设备、跨实验室的外部验证。
+测试集批量推理由 Lightning 的 `Trainer.predict()` 管理；分类指标和混淆矩阵交给 scikit-learn。默认在该实验目录下新建 `test_evaluation/`，生成 `test_metrics.json`、各类别 precision/recall/F1 的文本与 CSV 表、逐细胞预测 CSV、**仅含错分的 `test_misclassified.csv`**、计数及按真实类别归一化的混淆矩阵，以及每类最多三张高置信度错分示例图。错分 CSV 包含 `packed_index`、原始 TIFF 相对路径、受试者、网格行列、原始标签、模型预测与置信度；方便回到原图复核，不能直接当作错标证据。示例图的 1–99% 逐图对比度拉伸**只用于观看**，不影响推理。若报告目录已存在，命令会拒绝覆盖，避免误把多次测试当成独立验证。该测试集仅含两名保留受试者，指标不能替代跨设备、跨实验室的外部验证。
 
-可选：若希望不再设置 `PYTHONPATH`，在已激活环境中执行 `python -m pip install --no-deps --no-build-isolation -e .`，此后可使用 `leukocyte-train` 和 `leukocyte-evaluate` 命令。
+新的完整训练会用 Lightning 回调在 `validation_errors/epoch_000.csv` 等文件保存**每一轮**的验证错分；`validation_errors/frequency.csv` 统计同一 `packed_index` 错分的轮数、轮号和被判成的类别。轮号从 0 开始。冒烟测试不写这些文件。旧训练没有逐轮预测，无法事后恢复每轮错分；只能用其 `best.ckpt` 对验证集得到一份最佳权重的快照：
+
+```powershell
+$run = ".\runs\resnet18_four_imagenet_flips_20261011_143841"
+python -m leukocyte_analysis.record_errors --split val --checkpoint "$run\checkpoints\best.ckpt" --output-csv "$run\validation_errors\best_misclassified.csv"
+```
+
+对于旧测试报告，不再次运行测试推理，而是从**已有**的预测 CSV 补出可定位的错分记录：
+
+```powershell
+python -m leukocyte_analysis.record_errors --split test --predictions-csv "$run\test_evaluation\test_predictions.csv" --output-csv "$run\test_evaluation\test_misclassified.csv"
+```
+
+记录程序拒绝覆盖已有目标文件；人工核查时不要根据测试集错分调整模型后再把同一测试集称为独立最终测试。
+
+可选：若希望不再设置 `PYTHONPATH`，在已激活环境中执行 `python -m pip install --no-deps --no-build-isolation -e .`，此后可使用 `leukocyte-train`、`leukocyte-evaluate` 和 `leukocyte-record-errors` 命令。
 
 运行不依赖完整数据集的单元测试：
 

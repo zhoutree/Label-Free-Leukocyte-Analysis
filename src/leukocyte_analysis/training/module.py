@@ -65,15 +65,30 @@ class LeukocyteClassifier(L.LightningModule):
                  prog_bar=True, logger=False)
         return objective
 
-    def validation_step(self, batch: tuple[torch.Tensor, torch.Tensor], batch_idx: int) -> None:
+    def validation_step(
+        self, batch: tuple[torch.Tensor, ...], batch_idx: int
+    ) -> dict[str, list] | None:
         """验证集保持原始分布；指标只在整轮结束后汇总。"""
-        images, targets = batch
+        images, targets = batch[:2]
         logits = self(images)
         self.val_loss.update(F.cross_entropy(logits, targets, reduction="none"))
         self.val_f1.update(logits, targets)
         self.val_recall.update(logits, targets)
         self.log("val_loss", self.val_loss, on_step=False, on_epoch=True, prog_bar=True)
         self.log("val_macro_f1", self.val_f1, on_step=False, on_epoch=True, prog_bar=True)
+
+        # 仅把错分图块的小量元数据交给回调；不保存整批 logits 或图像。
+        if len(batch) == 3:
+            probabilities = logits.detach().softmax(dim=1)
+            confidence, predicted = probabilities.max(dim=1)
+            wrong = predicted != targets
+            return {
+                "packed_index": batch[2][wrong].cpu().tolist(),
+                "true_index": targets[wrong].cpu().tolist(),
+                "predicted_index": predicted[wrong].cpu().tolist(),
+                "confidence": confidence[wrong].cpu().tolist(),
+            }
+        return None
 
     def on_validation_epoch_end(self) -> None:
         """记录四类各自的召回率，便于发现模型忽略少数类。"""

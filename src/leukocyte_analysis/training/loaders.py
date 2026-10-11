@@ -30,7 +30,8 @@ def make_loaders(
     )
     common = (split_csv, tiles_npy, stats_json)
     train_set = LeukocyteDataset(*common, "train", transform=train_transform)
-    val_set = LeukocyteDataset(*common, "val")
+    # 验证批次带上原始 CSV 行号；Lightning 回调据此保存逐图块错分。
+    val_set = LeukocyteDataset(*common, "val", include_index=True)
     counts = Counter(label for _index, label, _donor in train_set.samples)
     if len(counts) != len(CLASS_NAMES):
         raise ValueError("训练集缺少某个类别")

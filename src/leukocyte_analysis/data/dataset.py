@@ -22,6 +22,7 @@ class LeukocyteDataset(Dataset):
         stats_json: Path,
         split: str,
         transform: Callable[[torch.Tensor], torch.Tensor] | None = None,
+        include_index: bool = False,
     ) -> None:
         if split not in {"train", "val", "test"}:
             raise ValueError(f"未知数据组：{split}")
@@ -30,8 +31,10 @@ class LeukocyteDataset(Dataset):
         class_to_index = {name: index for index, name in enumerate(self.class_names)}
         self.tiles_npy = tiles_npy.resolve()
         self.transform = transform
+        self.include_index = include_index
         self._tiles = None  # 实际读取时才打开；各 DataLoader 进程分别映射。
         self.samples = []
+        self.source_by_index = {}
 
         # CSV 行号与 .npy 图块索引一一对应，只保留当前数据组的行。
         with split_csv.open("r", newline="", encoding="utf-8") as csv_file:
@@ -42,6 +45,14 @@ class LeukocyteDataset(Dataset):
                     self.samples.append(
                         (packed_index, label, record["donor"])
                     )
+                    # 错分记录通过同一索引追溯原始 TIFF、网格位置和原始标签。
+                    self.source_by_index[packed_index] = {
+                        "file": record.get("file", ""),
+                        "donor": record["donor"],
+                        "source_label": record["label"],
+                        "row": record.get("row", ""),
+                        "col": record.get("col", ""),
+                    }
 
         with stats_json.open("r", encoding="utf-8") as json_file:
             stats = json.load(json_file)
@@ -69,7 +80,7 @@ class LeukocyteDataset(Dataset):
             )
         return self._tiles
 
-    def __getitem__(self, index: int) -> tuple[torch.Tensor, int]:
+    def __getitem__(self, index: int) -> tuple[torch.Tensor, int] | tuple[torch.Tensor, int, int]:
         packed_index, label, _donor = self.samples[index]
         tile = self._get_tiles()[packed_index]
 
@@ -82,4 +93,6 @@ class LeukocyteDataset(Dataset):
         # 增强只由训练加载器传入；验证和测试图像保持原样。
         if self.transform is not None:
             image = self.transform(image)
+        if self.include_index:
+            return image, label, packed_index
         return image, label

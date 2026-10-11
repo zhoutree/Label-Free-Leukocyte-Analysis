@@ -9,6 +9,7 @@ from lightning.pytorch.loggers import CSVLogger, TensorBoardLogger
 from torch import nn
 from torch.utils.data import DataLoader
 
+from .error_logging import ValidationErrorLogger
 from .module import LeukocyteClassifier
 from .progress import CompactRichProgressBar, prepare_console_output
 
@@ -54,6 +55,11 @@ def run_training(
             enable_version_counter=False,
         )
         callbacks.append(checkpoint)
+        if getattr(val_loader.dataset, "include_index", False):
+            # Lightning 回调记录每轮错分，稳定索引由验证数据集提供。
+            callbacks.append(ValidationErrorLogger(
+                val_loader.dataset, output_dir / "validation_errors"
+            ))
         if early_stopping_patience > 0:
             # 与最佳权重使用同一验证指标；连续若干次无提升后停止。
             callbacks.append(EarlyStopping(
