@@ -41,10 +41,10 @@ class LeukocyteClassifier(L.LightningModule):
         return self.backbone(images)
 
     def predict_step(
-        self, batch: tuple[torch.Tensor, torch.Tensor], batch_idx: int
+        self, batch: tuple[torch.Tensor, ...], batch_idx: int
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """供 Trainer.predict 使用；返回标签、预测类别和置信度。"""
-        images, targets = batch
+        """供 Trainer.predict 使用；兼容带原始索引的验证批次。"""
+        images, targets = batch[:2]
         confidence, predicted = self(images).softmax(dim=1).max(dim=1)
         # 及时转回 CPU，避免 Lightning 汇集全部预测时占用显存。
         return targets.cpu(), predicted.cpu(), confidence.cpu()

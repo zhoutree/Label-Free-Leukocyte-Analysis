@@ -13,6 +13,7 @@ src/leukocyte_analysis/
   training/                     数据加载器、Lightning 模块和实验配置
   evaluation/                   独立测试推理、指标和图像报告
   train.py                      命令行入口
+  cross_validate.py             按受试者交叉验证入口
   evaluate.py                   训练完成后的测试集评估入口
   record_errors.py              从预测文件或检查点导出可定位的错分记录
 data/processed/                 已处理图块、清单、划分和训练集统计
@@ -69,6 +70,24 @@ tensorboard --logdir .\runs
 
 `environment.yml` 让 Lightning、TorchMetrics 等普通依赖由 pip 自行选择兼容版本；只固定 Python 3.14 和已验证可使用 GPU 的 PyTorch/torchvision CUDA 13.2 配对，以免重建环境时意外改为 CPU 版本。
 
+## 按受试者交叉验证
+
+交叉验证只使用原 train＋val 的 11 名受试者，默认分为 3 折。每折从 ImageNet 权重重新初始化模型，并仅用该折训练受试者重算像素均值、标准差和类别权重；同一人不会同时出现在训练与验证中。原测试受试者 **CRF049 和 CRF066 全部排除**，包括待核查的 `CRF049/monocyte` 图块；原始数据与正式测试报告不变。折内 CSV 保留全部原行及索引，但测试受试者标为 `excluded`，不会被训练或验证数据加载器读取。
+
+先检查第一折的两批训练和验证（不保存权重）：
+
+```powershell
+python -m leukocyte_analysis.cross_validate --smoke-test --init random --batch-size 8
+```
+
+再运行完整的三折实验；每折最多 20 轮，耗时约为单次训练的三倍，不会由上述冒烟命令自动启动：
+
+```powershell
+python -m leukocyte_analysis.cross_validate --folds 3 --init imagenet --lr 0.0001 --epochs 20 --batch-size 128
+```
+
+每次新建 `runs/cv_resnet18_.../`。`plan.json` 记录受试者分折，`fold_*/data/` 保存该折划分和训练集统计，`fold_*/training/` 保存日志及最佳检查点，`fold_*/validation_predictions.csv` 保存该折预测；`summary.json` 汇总折外准确率、macro-F1、各类指标和各受试者指标。这些验证结果用于比较训练方案；CRF049/CRF066 已经被查看过，不能再把它们当作新的独立最终测试。
+
 ## 最终测试评估
 
 先仅用训练/验证集确定实验配置和最佳模型，再用新四分类训练的 `best.ckpt` 对保留测试受试者评估一次。评估入口会拒绝旧五分类检查点：
@@ -95,7 +114,7 @@ python -m leukocyte_analysis.record_errors --split test --predictions-csv "$run\
 
 记录程序拒绝覆盖已有目标文件；人工核查时不要根据测试集错分调整模型后再把同一测试集称为独立最终测试。
 
-可选：若希望不再设置 `PYTHONPATH`，在已激活环境中执行 `python -m pip install --no-deps --no-build-isolation -e .`，此后可使用 `leukocyte-train`、`leukocyte-evaluate` 和 `leukocyte-record-errors` 命令。
+可选：若希望不再设置 `PYTHONPATH`，在已激活环境中执行 `python -m pip install --no-deps --no-build-isolation -e .`，此后可使用 `leukocyte-train`、`leukocyte-cross-validate`、`leukocyte-evaluate` 和 `leukocyte-record-errors` 命令。
 
 运行不依赖完整数据集的单元测试：
 

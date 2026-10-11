@@ -18,7 +18,8 @@ from leukocyte_analysis.training.module import LeukocyteClassifier
 class SyntheticCells:
     """模拟顺序数据集与清单索引，便于测试报告生成。"""
 
-    def __init__(self) -> None:
+    def __init__(self, include_index: bool = False) -> None:
+        self.include_index = include_index
         self.class_names = CLASS_NAMES
         self.labels = [0, 1, 2, 3, 0, 1, 2, 3]
         self.tiles = np.stack([
@@ -38,8 +39,9 @@ class SyntheticCells:
     def __len__(self) -> int:
         return len(self.labels)
 
-    def __getitem__(self, index: int) -> tuple[torch.Tensor, int]:
-        return torch.from_numpy(self.tiles[index][None]), self.labels[index]
+    def __getitem__(self, index: int) -> tuple:
+        sample = (torch.from_numpy(self.tiles[index][None]), self.labels[index])
+        return (*sample, index) if self.include_index else sample
 
     def _get_tiles(self) -> np.ndarray:
         return self.tiles
@@ -97,6 +99,13 @@ class TestEvaluation(unittest.TestCase):
             self.assertEqual(errors[0]["row"], "2")
             with self.assertRaises(FileExistsError):
                 output.mkdir(exist_ok=False)
+
+    def test_indexed_validation_predictions_keep_manifest_indices(self) -> None:
+        dataset = SyntheticCells(include_index=True)
+        model = LeukocyteClassifier(PixelClassifier(), torch.ones(4), 0.01, 0.0)
+        predictions = predict(model, dataset, 4, torch.device("cpu"))
+        self.assertEqual([row["packed_index"] for row in predictions], list(range(8)))
+        self.assertEqual([row["true_index"] for row in predictions], dataset.labels)
 
     def test_failed_plot_does_not_publish_partial_report(self) -> None:
         dataset = SyntheticCells()
