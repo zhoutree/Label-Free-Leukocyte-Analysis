@@ -9,7 +9,8 @@ import numpy as np
 import torch
 from torch import nn
 
-from leukocyte_analysis.evaluation.runner import predict, save_report
+from leukocyte_analysis.data.bbbc045_config import CLASS_NAMES
+from leukocyte_analysis.evaluation.runner import check_checkpoint_head, predict, save_report
 from leukocyte_analysis.training.module import LeukocyteClassifier
 
 
@@ -17,7 +18,8 @@ class SyntheticCells:
     """模拟顺序数据集与清单索引，便于测试报告生成。"""
 
     def __init__(self) -> None:
-        self.labels = [0, 1, 2, 3, 4, 0, 1, 2, 3, 4]
+        self.class_names = CLASS_NAMES
+        self.labels = [0, 1, 2, 3, 0, 1, 2, 3]
         self.tiles = np.stack([
             np.full((55, 55), 1 if index == 2 else label, dtype=np.float32)
             for index, label in enumerate(self.labels)
@@ -40,22 +42,37 @@ class PixelClassifier(nn.Module):
 
     def forward(self, images: torch.Tensor) -> torch.Tensor:
         labels = images[:, 0, 0, 0].long()
-        return torch.nn.functional.one_hot(labels, num_classes=5).float() * 10
+        return torch.nn.functional.one_hot(labels, num_classes=4).float() * 10
 
 
 class TestEvaluation(unittest.TestCase):
+    def test_old_five_class_checkpoint_is_rejected(self) -> None:
+        # 旧权重保留在磁盘，但不能误用为四分类模型。
+        saved = {"state_dict": {"backbone.fc.weight": torch.zeros(5, 512)},
+                 "hyper_parameters": {"learning_rate": 1e-4}}
+        with patch("leukocyte_analysis.evaluation.runner.torch.load", return_value=saved):
+            with self.assertRaisesRegex(ValueError, "旧五分类权重"):
+                check_checkpoint_head(Path("old.ckpt"))
+
+    def test_four_class_checkpoint_is_accepted(self) -> None:
+        saved = {"state_dict": {"backbone.fc.weight": torch.zeros(4, 512)},
+                 "hyper_parameters": {}}
+        with patch("leukocyte_analysis.evaluation.runner.torch.load", return_value=saved):
+            check_checkpoint_head(Path("new.ckpt"))
+
     def test_report_and_error_images(self) -> None:
         dataset = SyntheticCells()
-        model = LeukocyteClassifier(PixelClassifier(), torch.ones(5), 0.01, 0.0)
+        model = LeukocyteClassifier(PixelClassifier(), torch.ones(4), 0.01, 0.0)
         predictions = predict(model, dataset, 4, torch.device("cpu"))
-        self.assertEqual(len(predictions), 10)
+        self.assertEqual(len(predictions), 8)
         self.assertEqual(sum(row["true_index"] != row["predicted_index"]
                              for row in predictions), 1)
 
         with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent) as temporary:
             output = Path(temporary) / "test_evaluation"
             summary = save_report(dataset, predictions, output)
-            self.assertAlmostEqual(summary["accuracy"], 0.9)
+            self.assertAlmostEqual(summary["accuracy"], 0.875)
+            self.assertEqual(summary["class_names"], list(CLASS_NAMES))
             for name in ("test_metrics.json", "test_classification_report.txt",
                          "test_per_class_metrics.csv",
                          "test_predictions.csv", "confusion_matrix_counts.png",
@@ -66,7 +83,7 @@ class TestEvaluation(unittest.TestCase):
 
     def test_failed_plot_does_not_publish_partial_report(self) -> None:
         dataset = SyntheticCells()
-        model = LeukocyteClassifier(PixelClassifier(), torch.ones(5), 0.01, 0.0)
+        model = LeukocyteClassifier(PixelClassifier(), torch.ones(4), 0.01, 0.0)
         predictions = predict(model, dataset, 4, torch.device("cpu"))
         with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent) as temporary:
             output = Path(temporary) / "test_evaluation"

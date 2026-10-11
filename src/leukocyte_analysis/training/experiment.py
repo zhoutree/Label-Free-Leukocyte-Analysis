@@ -4,7 +4,7 @@ from pathlib import Path
 
 import lightning as L
 import torch
-from lightning.pytorch.callbacks import ModelCheckpoint
+from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
 from lightning.pytorch.loggers import CSVLogger, TensorBoardLogger
 from torch import nn
 from torch.utils.data import DataLoader
@@ -23,8 +23,11 @@ def run_training(
     learning_rate: float,
     weight_decay: float,
     smoke_test: bool = False,
+    early_stopping_patience: int = 0,
 ) -> None:
-    """按验证 macro-F1 选最佳权重；冒烟模式只运行两批且不保存文件。"""
+    """按验证 macro-F1 选最佳权重；可提前停止，冒烟模式不保存文件。"""
+    if early_stopping_patience < 0:
+        raise ValueError("early_stopping_patience 不得小于 0")
     module = LeukocyteClassifier(backbone, class_weights, learning_rate, weight_decay)
     checkpoint = None
     if smoke_test:
@@ -48,6 +51,12 @@ def run_training(
             enable_version_counter=False,
         )
         callbacks = [checkpoint]
+        if early_stopping_patience > 0:
+            # 与最佳权重使用同一验证指标；连续若干次无提升后停止。
+            callbacks.append(EarlyStopping(
+                monitor="val_macro_f1", mode="max",
+                patience=early_stopping_patience, min_delta=0.0,
+            ))
 
     trainer = L.Trainer(
         accelerator="gpu" if device.type == "cuda" else "cpu",

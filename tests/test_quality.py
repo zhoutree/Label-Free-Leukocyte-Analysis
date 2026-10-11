@@ -8,7 +8,7 @@ import numpy as np
 from scipy.ndimage import gaussian_filter
 
 from leukocyte_analysis.data.audit import _inspect_tiles
-from leukocyte_analysis.data.bbbc045_config import CLASS_NAMES
+from leukocyte_analysis.data.bbbc045_config import SOURCE_CLASS_NAMES
 from leukocyte_analysis.data.quality import focus_proxy
 
 
@@ -30,17 +30,17 @@ class TestFocusProxy(unittest.TestCase):
         records = [
             {"file": f"{label}.tif", "label": label, "split": "train",
              "row": "0", "col": "0"}
-            for label in CLASS_NAMES
+            for label in SOURCE_CLASS_NAMES
         ]
-        records.append({"file": "blurred.tif", "label": CLASS_NAMES[0],
+        records.append({"file": "blurred.tif", "label": SOURCE_CLASS_NAMES[0],
                         "split": "val", "row": "0", "col": "0"})
-        tiles = np.stack([sharp] * len(CLASS_NAMES) + [blurred])
+        tiles = np.stack([sharp] * len(SOURCE_CLASS_NAMES) + [blurred])
         with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent) as temporary:
             path = Path(temporary) / "tiles.npy"
             np.save(path, tiles)
             quality, _contrast, focus = _inspect_tiles(records, path)
         self.assertEqual(quality["nonfinite"], 0)
-        self.assertEqual(focus["candidate_counts"]["val"][CLASS_NAMES[0]], 1)
+        self.assertEqual(focus["candidate_counts"]["val"][SOURCE_CLASS_NAMES[0]], 1)
         self.assertEqual(focus["auto_excluded"], 0)
 
 

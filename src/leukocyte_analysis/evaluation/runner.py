@@ -18,6 +18,14 @@ from ..training.module import LeukocyteClassifier
 from .plots import save_confusion_matrices, save_error_examples
 
 
+def check_checkpoint_head(checkpoint: Path) -> None:
+    """在推理前拒绝旧五分类检查点，避免标签含义与新模型错配。"""
+    saved = torch.load(checkpoint, map_location="cpu", weights_only=True)
+    head = saved["state_dict"].get("backbone.fc.weight")
+    if head is None or head.ndim != 2 or head.shape[0] != len(CLASS_NAMES):
+        raise ValueError("只支持新四分类 ResNet 检查点；旧五分类权重不能用于四分类评估")
+
+
 def load_classifier(checkpoint: Path, backbone: nn.Module) -> LeukocyteClassifier:
     """从本项目生成的 Lightning 检查点恢复网络，无须再下载预训练权重。"""
     return LeukocyteClassifier.load_from_checkpoint(
@@ -30,6 +38,8 @@ def load_classifier(checkpoint: Path, backbone: nn.Module) -> LeukocyteClassifie
 def predict(model: LeukocyteClassifier, dataset: LeukocyteDataset, batch_size: int,
             device: torch.device) -> list[dict]:
     """由 Lightning 接管顺序推理，再将输出关联到清单索引。"""
+    if tuple(model.class_names) != tuple(dataset.class_names):
+        raise ValueError("模型与数据集的类别顺序不一致")
     loader = DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=0,
                         pin_memory=device.type == "cuda")
     trainer = L.Trainer(
@@ -50,8 +60,8 @@ def predict(model: LeukocyteClassifier, dataset: LeukocyteDataset, batch_size: i
                 raise ValueError("DataLoader 顺序与数据清单不一致")
             records.append({
                 "packed_index": packed_index, "donor": donor,
-                "true_index": target, "true_label": CLASS_NAMES[target],
-                "predicted_index": guess, "predicted_label": CLASS_NAMES[guess],
+                "true_index": target, "true_label": dataset.class_names[target],
+                "predicted_index": guess, "predicted_label": dataset.class_names[guess],
                 "confidence": score,
             })
             offset += 1
@@ -78,13 +88,15 @@ def save_report(dataset: LeukocyteDataset, predictions: list[dict], output_dir: 
 
 def _write_report(dataset: LeukocyteDataset, predictions: list[dict], output_dir: Path) -> dict:
     """以 scikit-learn 计算指标，并写入暂存目录。"""
+    class_names = dataset.class_names
     y_true = [row["true_index"] for row in predictions]
     y_pred = [row["predicted_index"] for row in predictions]
-    options = dict(labels=list(range(len(CLASS_NAMES))), target_names=list(CLASS_NAMES),
+    options = dict(labels=list(range(len(class_names))), target_names=list(class_names),
                    zero_division=0)
     report = classification_report(y_true, y_pred, output_dict=True, **options)
     summary = {
         "samples": len(predictions),
+        "class_names": list(class_names),
         "accuracy": float(accuracy_score(y_true, y_pred)),
         "macro_f1": float(report["macro avg"]["f1-score"]),
         "classification_report": report,
@@ -97,14 +109,14 @@ def _write_report(dataset: LeukocyteDataset, predictions: list[dict], output_dir
     with (output_dir / "test_per_class_metrics.csv").open("w", newline="", encoding="utf-8") as file:
         writer = csv.DictWriter(file, fieldnames=("class", "precision", "recall", "f1-score", "support"))
         writer.writeheader()
-        for name in CLASS_NAMES:
+        for name in class_names:
             writer.writerow({"class": name, **report[name]})
     with (output_dir / "test_predictions.csv").open("w", newline="", encoding="utf-8") as file:
         writer = csv.DictWriter(file, fieldnames=list(predictions[0]))
         writer.writeheader()
         writer.writerows(predictions)
-    save_confusion_matrices(y_true, y_pred, output_dir)
-    save_error_examples(dataset, predictions, output_dir / "misclassified_examples.png")
+    save_confusion_matrices(y_true, y_pred, output_dir, class_names)
+    save_error_examples(dataset, predictions, output_dir / "misclassified_examples.png", class_names)
     return summary
 
 
@@ -116,6 +128,7 @@ def evaluate_checkpoint(checkpoint: Path, split_csv: Path, tiles_npy: Path,
             raise FileNotFoundError(path)
     if output_dir.exists():
         raise FileExistsError(f"报告目录已存在，避免覆盖或重复评估：{output_dir}")
+    check_checkpoint_head(checkpoint)
     dataset = LeukocyteDataset(split_csv, tiles_npy, stats_json, "test")
     backbone = build_resnet18(len(CLASS_NAMES), initialization="random")
     model = load_classifier(checkpoint, backbone)

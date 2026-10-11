@@ -1,16 +1,25 @@
 """训练入口和指标的轻量测试，不加载完整图像数据。"""
 
+import csv
+import json
 import sys
+import tempfile
 import unittest
+from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
+import numpy as np
 import torch
 from torch import nn
 from torchmetrics.classification import MulticlassF1Score, MulticlassRecall
 from torchvision.models import ResNet18_Weights, resnet18
 
+from leukocyte_analysis.data.bbbc045_config import CLASS_NAMES, model_label
+from leukocyte_analysis.data.dataset import LeukocyteDataset
 from leukocyte_analysis.models.resnet import build_resnet18
 from leukocyte_analysis.train import PROJECT_ROOT, parse_args
+from leukocyte_analysis.training.loaders import make_loaders
 
 
 class TestTrainingConfiguration(unittest.TestCase):
@@ -22,6 +31,37 @@ class TestTrainingConfiguration(unittest.TestCase):
         self.assertEqual(args.init, "imagenet")
         self.assertEqual(args.lr, 1e-4)
         self.assertEqual(args.weight_decay, 0.01)
+        self.assertEqual(args.augmentation, "flips")
+        self.assertEqual(args.early_stopping_patience, 5)
+        self.assertFalse(hasattr(args, "task"))
+
+    def test_b_and_t_map_to_lymphocyte(self) -> None:
+        self.assertEqual(CLASS_NAMES,
+                         ("lymphocyte", "eosinophil", "monocyte", "neutrophil"))
+        self.assertEqual(model_label("B"), "lymphocyte")
+        self.assertEqual(model_label("T"), "lymphocyte")
+        with self.assertRaises(ValueError):
+            model_label("unknown")
+
+    def test_dataset_maps_b_and_t_without_rewriting_manifest(self) -> None:
+        # 合成清单保持原始 B/T 标签，模型读取时统一合并。
+        with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent) as temporary:
+            root = Path(temporary)
+            split_csv, tiles_npy, stats_json = (root / "split.csv", root / "tiles.npy",
+                                                root / "stats.json")
+            with split_csv.open("w", newline="", encoding="utf-8") as file:
+                writer = csv.DictWriter(file, fieldnames=("split", "label", "donor"))
+                writer.writeheader()
+                for label in ("B", "T", "eosinophil", "neutrophil"):
+                    writer.writerow({"split": "train", "label": label, "donor": "synthetic"})
+            np.save(tiles_npy, np.zeros((4, 55, 55), dtype=np.float32))
+            stats_json.write_text(json.dumps({"mean": 0, "std": 1}), encoding="utf-8")
+
+            dataset = LeukocyteDataset(split_csv, tiles_npy, stats_json, "train")
+            self.assertEqual([row[1] for row in dataset.samples], [0, 0, 1, 3])
+            self.assertEqual(tuple(dataset[0][0].shape), (1, 55, 55))
+            # np.load(mmap_mode="r") 在 Windows 上需释放映射才能清理临时文件。
+            del dataset
 
     def test_random_initialization_can_be_selected(self) -> None:
         with patch.object(sys, "argv", ["leukocyte-train", "--init", "random", "--weight-decay", "0"]):
@@ -29,31 +69,48 @@ class TestTrainingConfiguration(unittest.TestCase):
         self.assertEqual(args.init, "random")
         self.assertEqual(args.weight_decay, 0.0)
 
+    def test_only_training_loader_receives_augmentation(self) -> None:
+        # 不打开正式数据文件，只核对增强不会进入验证集。
+        training_samples = [(index, index, "donor") for index in range(4)]
+        training_set = SimpleNamespace(samples=training_samples)
+        validation_set = SimpleNamespace(samples=[])
+        with patch("leukocyte_analysis.training.loaders.LeukocyteDataset",
+                   side_effect=[training_set, validation_set]) as dataset_type:
+            with patch("leukocyte_analysis.training.loaders.DataLoader",
+                       side_effect=[object(), object()]):
+                make_loaders(None, None, None, 8, 42, torch.device("cpu"), "flips")
+
+        transform = dataset_type.call_args_list[0].kwargs["transform"]
+        self.assertIsNotNone(transform)
+        self.assertNotIn("transform", dataset_type.call_args_list[1].kwargs)
+        image = torch.arange(9).reshape(1, 3, 3)
+        self.assertEqual(sorted(transform(image).flatten().tolist()), list(range(9)))
+
     def test_pretrained_backbone_and_small_image_layers(self) -> None:
         # 用本地构造的模型代替下载，验证传入的权重枚举与替换后的结构。
         backbone = resnet18(weights=None)
         original_body = backbone.layer1[0].conv1.weight
         with patch("leukocyte_analysis.models.resnet.resnet18", return_value=backbone) as constructor:
-            model = build_resnet18(5)
+            model = build_resnet18(len(CLASS_NAMES))
         constructor.assert_called_once_with(weights=ResNet18_Weights.IMAGENET1K_V1)
         self.assertIs(model.layer1[0].conv1.weight, original_body)
         self.assertEqual(tuple(model.conv1.weight.shape), (64, 1, 3, 3))
         self.assertIsInstance(model.maxpool, nn.Identity)
-        self.assertEqual(model.fc.out_features, 5)
+        self.assertEqual(model.fc.out_features, 4)
 
     def test_new_conv_uses_kaiming_initialization(self) -> None:
         backbone = resnet18(weights=None)
         with patch("leukocyte_analysis.models.resnet.resnet18", return_value=backbone):
             with patch("leukocyte_analysis.models.resnet.nn.init.kaiming_normal_") as initialize:
-                model = build_resnet18(5, initialization="random")
+                model = build_resnet18(4, initialization="random")
         initialize.assert_called_once_with(model.conv1.weight, mode="fan_out", nonlinearity="relu")
 
 
 class TestMetrics(unittest.TestCase):
     def test_perfect_predictions(self) -> None:
-        labels = torch.repeat_interleave(torch.arange(5), torch.arange(1, 6))
-        score = MulticlassF1Score(num_classes=5, average="macro")(labels, labels)
-        recalls = MulticlassRecall(num_classes=5, average=None)(labels, labels)
+        labels = torch.repeat_interleave(torch.arange(4), torch.arange(1, 5))
+        score = MulticlassF1Score(num_classes=4, average="macro")(labels, labels)
+        recalls = MulticlassRecall(num_classes=4, average=None)(labels, labels)
         self.assertEqual(score.item(), 1.0)
         self.assertTrue(torch.all(recalls == 1))
 

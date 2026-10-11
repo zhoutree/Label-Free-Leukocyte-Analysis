@@ -2,19 +2,14 @@
 
 import csv
 import json
+from collections.abc import Callable
 from pathlib import Path
 
 import numpy as np
 import torch
 from torch.utils.data import Dataset
 
-from .bbbc045_config import CLASS_NAMES
-
-
-# 类别编号由配置中的顺序决定，例如 B=0、T=1。
-CLASS_TO_INDEX = {
-    name: index for index, name in enumerate(CLASS_NAMES)
-}
+from .bbbc045_config import CLASS_NAMES, model_label
 
 
 class LeukocyteDataset(Dataset):
@@ -26,11 +21,15 @@ class LeukocyteDataset(Dataset):
         tiles_npy: Path,
         stats_json: Path,
         split: str,
+        transform: Callable[[torch.Tensor], torch.Tensor] | None = None,
     ) -> None:
         if split not in {"train", "val", "test"}:
             raise ValueError(f"未知数据组：{split}")
 
+        self.class_names = CLASS_NAMES
+        class_to_index = {name: index for index, name in enumerate(self.class_names)}
         self.tiles_npy = tiles_npy.resolve()
+        self.transform = transform
         self._tiles = None  # 实际读取时才打开；各 DataLoader 进程分别映射。
         self.samples = []
 
@@ -38,7 +37,8 @@ class LeukocyteDataset(Dataset):
         with split_csv.open("r", newline="", encoding="utf-8") as csv_file:
             for packed_index, record in enumerate(csv.DictReader(csv_file)):
                 if record["split"] == split:
-                    label = CLASS_TO_INDEX[record["label"]]
+                    # 原始清单仍保存 B/T；只在读取时合并为淋巴细胞。
+                    label = class_to_index[model_label(record["label"])]
                     self.samples.append(
                         (packed_index, label, record["donor"])
                     )
@@ -79,4 +79,7 @@ class LeukocyteDataset(Dataset):
             copy=True,
         )
         image = torch.from_numpy(normalized[None, :, :])
+        # 增强只由训练加载器传入；验证和测试图像保持原样。
+        if self.transform is not None:
+            image = self.transform(image)
         return image, label

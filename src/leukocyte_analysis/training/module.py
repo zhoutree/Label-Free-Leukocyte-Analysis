@@ -21,8 +21,11 @@ class LeukocyteClassifier(L.LightningModule):
         weight_decay: float,
     ) -> None:
         super().__init__()
+        if len(CLASS_NAMES) != len(class_weights):
+            raise ValueError("类别名称数量与类别权重数量不一致")
         self.save_hyperparameters(ignore=("backbone", "class_weights"))
         self.backbone = backbone
+        self.class_names = CLASS_NAMES
         self.register_buffer("class_weights", class_weights.detach().clone())
         self.learning_rate = learning_rate
         self.weight_decay = weight_decay
@@ -30,8 +33,8 @@ class LeukocyteClassifier(L.LightningModule):
         self.train_loss = MeanMetric()
         self.train_weighted_loss = MeanMetric()
         self.val_loss = MeanMetric()
-        self.val_f1 = MulticlassF1Score(num_classes=len(CLASS_NAMES), average="macro")
-        self.val_recall = MulticlassRecall(num_classes=len(CLASS_NAMES), average=None)
+        self.val_f1 = MulticlassF1Score(num_classes=len(self.class_names), average="macro")
+        self.val_recall = MulticlassRecall(num_classes=len(self.class_names), average=None)
 
     def forward(self, images: torch.Tensor) -> torch.Tensor:
         """返回每类的原始分数，不在模型内做 softmax。"""
@@ -73,9 +76,9 @@ class LeukocyteClassifier(L.LightningModule):
         self.log("val_macro_f1", self.val_f1, on_step=False, on_epoch=True, prog_bar=True)
 
     def on_validation_epoch_end(self) -> None:
-        """记录五类各自的召回率，便于发现模型忽略少数类。"""
+        """记录四类各自的召回率，便于发现模型忽略少数类。"""
         recalls = self.val_recall.compute()
-        for index, name in enumerate(CLASS_NAMES):
+        for index, name in enumerate(self.class_names):
             self.log(f"val_recall_{name}", recalls[index], on_step=False, on_epoch=True)
         self.val_recall.reset()
 

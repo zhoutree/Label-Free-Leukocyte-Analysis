@@ -5,6 +5,7 @@ from pathlib import Path
 
 import torch
 from torch.utils.data import DataLoader
+from torchvision.transforms import v2
 
 from ..data.bbbc045_config import CLASS_NAMES
 from ..data.dataset import LeukocyteDataset
@@ -17,10 +18,18 @@ def make_loaders(
     batch_size: int,
     seed: int,
     device: torch.device,
+    augmentation: str = "none",
 ) -> tuple[DataLoader, DataLoader, torch.Tensor]:
-    """只根据训练集计算类别权重，验证集保持原始分布。"""
+    """只增强训练集、只用训练标签计算权重；验证集保持原始分布。"""
+    if augmentation not in {"none", "flips"}:
+        raise ValueError(f"未知增强方式：{augmentation}")
+    # 翻转不会插值或裁掉 55×55 图中的细胞结构。
+    train_transform = (
+        v2.Compose([v2.RandomHorizontalFlip(), v2.RandomVerticalFlip()])
+        if augmentation == "flips" else None
+    )
     common = (split_csv, tiles_npy, stats_json)
-    train_set = LeukocyteDataset(*common, "train")
+    train_set = LeukocyteDataset(*common, "train", transform=train_transform)
     val_set = LeukocyteDataset(*common, "val")
     counts = Counter(label for _index, label, _donor in train_set.samples)
     if len(counts) != len(CLASS_NAMES):

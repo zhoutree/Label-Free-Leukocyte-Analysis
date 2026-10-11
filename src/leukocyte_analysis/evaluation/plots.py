@@ -9,10 +9,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 from sklearn.metrics import ConfusionMatrixDisplay
 
-from ..data.bbbc045_config import CLASS_NAMES
-
-
-def save_confusion_matrices(y_true: list[int], y_pred: list[int], output_dir: Path) -> None:
+def save_confusion_matrices(y_true: list[int], y_pred: list[int], output_dir: Path,
+                            class_names: tuple[str, ...]) -> None:
     """分别保存计数和按真实类别归一化的混淆矩阵。"""
     for normalize, suffix, title in (
         (None, "counts", "Confusion matrix: counts"),
@@ -20,8 +18,8 @@ def save_confusion_matrices(y_true: list[int], y_pred: list[int], output_dir: Pa
     ):
         fig, ax = plt.subplots(figsize=(8, 7), layout="constrained")
         ConfusionMatrixDisplay.from_predictions(
-            y_true, y_pred, labels=range(len(CLASS_NAMES)),
-            display_labels=CLASS_NAMES, normalize=normalize,
+            y_true, y_pred, labels=range(len(class_names)),
+            display_labels=class_names, normalize=normalize,
             values_format="d" if normalize is None else ".2f", ax=ax,
             colorbar=True, cmap="Blues",
         )
@@ -31,11 +29,12 @@ def save_confusion_matrices(y_true: list[int], y_pred: list[int], output_dir: Pa
         plt.close(fig)
 
 
-def save_error_examples(dataset, predictions: list[dict], output_path: Path) -> None:
+def save_error_examples(dataset, predictions: list[dict], output_path: Path,
+                        class_names: tuple[str, ...]) -> None:
     """每个真实类别最多选三张高置信度错分图；拉伸只用于展示。"""
     errors = [row for row in predictions if row["true_index"] != row["predicted_index"]]
     selected = []
-    for label in range(len(CLASS_NAMES)):
+    for label in range(len(class_names)):
         candidates = (row for row in errors if row["true_index"] == label)
         selected.extend(sorted(candidates, key=lambda row: -row["confidence"])[:3])
 

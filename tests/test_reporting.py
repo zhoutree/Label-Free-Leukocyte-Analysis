@@ -4,24 +4,62 @@ import csv
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import torch
+from lightning.pytorch.callbacks import EarlyStopping
 from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
 from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
 
+from leukocyte_analysis.data.bbbc045_config import CLASS_NAMES
 from leukocyte_analysis.training.experiment import run_training
 from leukocyte_analysis.evaluation.runner import load_classifier
 
 
 class TestReporting(unittest.TestCase):
+    def test_four_class_module_uses_lymphocyte_metric(self) -> None:
+        from leukocyte_analysis.training.module import LeukocyteClassifier
+
+        module = LeukocyteClassifier(nn.Linear(1, 4), torch.ones(4), 1e-4, 0.0)
+        self.assertEqual(module.class_names, CLASS_NAMES)
+        self.assertEqual(module.val_f1.num_classes, 4)
+
+    def test_four_class_checkpoint_restores_weights(self) -> None:
+        # 用合成数据检查四分类保存与恢复，不接触保留测试集。
+        images = torch.arange(8, dtype=torch.float32).reshape(-1, 1) / 8
+        targets = torch.arange(8) % 4
+        loader = DataLoader(TensorDataset(images, targets), batch_size=4)
+        with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent) as temporary:
+            output = Path(temporary) / "four_class"
+            run_training(nn.Linear(1, 4), loader, loader, torch.ones(4),
+                         torch.device("cpu"), 1, output, 0.01, 0.0)
+            checkpoint = output / "checkpoints" / "best.ckpt"
+            restored = load_classifier(checkpoint, nn.Linear(1, 4))
+            self.assertEqual(restored.class_names, CLASS_NAMES)
+
+    def test_early_stopping_uses_the_checkpoint_metric(self) -> None:
+        # 仅检查 Lightning 的回调配置，不启动完整训练。
+        images = torch.zeros(4, 1)
+        targets = torch.arange(4)
+        loader = DataLoader(TensorDataset(images, targets), batch_size=4)
+        with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent) as temporary:
+            with patch("leukocyte_analysis.training.experiment.L.Trainer") as trainer:
+                run_training(nn.Linear(1, 4), loader, loader, torch.ones(4),
+                             torch.device("cpu"), 20, Path(temporary) / "run",
+                             1e-4, 0.01, early_stopping_patience=5)
+        callbacks = trainer.call_args.kwargs["callbacks"]
+        early_stop = next(item for item in callbacks if isinstance(item, EarlyStopping))
+        self.assertEqual(early_stop.monitor, "val_macro_f1")
+        self.assertEqual(early_stop.patience, 5)
+
     def test_one_epoch_writes_comparable_losses_and_curves(self) -> None:
-        # 五类各两个样本，避免借用正式数据或启动完整 ResNet 训练。
-        images = torch.arange(10, dtype=torch.float32).reshape(-1, 1) / 10
-        targets = torch.arange(10) % 5
-        loader = DataLoader(TensorDataset(images, targets), batch_size=5)
-        model = nn.Linear(1, 5)
-        weights = torch.tensor([1.0, 2.0, 1.0, 1.0, 1.0])
+        # 四类各两个样本，避免借用正式数据或启动完整 ResNet 训练。
+        images = torch.arange(8, dtype=torch.float32).reshape(-1, 1) / 8
+        targets = torch.arange(8) % 4
+        loader = DataLoader(TensorDataset(images, targets), batch_size=4)
+        model = nn.Linear(1, 4)
+        weights = torch.tensor([1.0, 2.0, 1.0, 1.0])
 
         # 使用项目内临时目录，兼容只允许写入工作区的运行环境。
         with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent) as temporary:
@@ -37,13 +75,13 @@ class TestReporting(unittest.TestCase):
             self.assertTrue((output / "checkpoints" / "last.ckpt").exists())
 
             # 被忽略的模型结构在加载时显式提供；确认检查点能独立恢复。
-            restored = load_classifier(output / "checkpoints" / "best.ckpt", nn.Linear(1, 5))
-            self.assertEqual(tuple(restored(images).shape), (10, 5))
+            restored = load_classifier(output / "checkpoints" / "best.ckpt", nn.Linear(1, 4))
+            self.assertEqual(tuple(restored(images).shape), (8, 4))
 
             events = EventAccumulator(str(output / "tensorboard"))
             events.Reload()
             for name in ("train_loss", "val_loss", "train_weighted_loss",
-                         "val_macro_f1", "val_recall_B"):
+                         "val_macro_f1", "val_recall_lymphocyte"):
                 self.assertEqual(len(events.Scalars(name)), 1)
 
 

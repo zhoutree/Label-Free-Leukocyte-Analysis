@@ -26,14 +26,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--weight-decay", type=float, default=0.01, help="AdamW 权重衰减；不是 L1 正则化")
     parser.add_argument("--init", choices=("imagenet", "random"), default="imagenet", help="模型权重初始化方式")
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--augmentation", choices=("none", "flips"), default="flips",
+                        help="仅训练集增强；flips 为随机水平与垂直翻转")
+    parser.add_argument("--early-stopping-patience", type=int, default=5,
+                        help="验证 macro-F1 连续多少轮未提高就停止；0 表示禁用")
     parser.add_argument("--smoke-test", action="store_true", help="只跑两批，不保存权重")
     parser.add_argument("--split-csv", type=Path, default=PROJECT_ROOT / "data/processed/bbbc045_split.csv")
     parser.add_argument("--tiles-npy", type=Path, default=PROJECT_ROOT / "data/processed/bbbc045_tiles.npy")
     parser.add_argument("--stats-json", type=Path, default=PROJECT_ROOT / "data/processed/bbbc045_train_stats.json")
     parser.add_argument("--output-dir", type=Path, default=None)
     args = parser.parse_args()
-    if args.epochs < 1 or args.batch_size < 1 or args.lr <= 0 or args.weight_decay < 0:
-        parser.error("epochs、batch-size 和 lr 必须大于 0；weight-decay 不得小于 0")
+    if (args.epochs < 1 or args.batch_size < 1 or args.lr <= 0
+            or args.weight_decay < 0 or args.early_stopping_patience < 0):
+        parser.error("epochs、batch-size 和 lr 必须大于 0；weight-decay 和 early-stopping-patience 不得小于 0")
     return args
 
 
@@ -48,14 +53,16 @@ def main() -> None:
     print("设备：", device)
     train_loader, val_loader, weights = make_loaders(
         args.split_csv, args.tiles_npy, args.stats_json,
-        args.batch_size, args.seed, device,
+        args.batch_size, args.seed, device, args.augmentation,
     )
-    print("初始化：", args.init, "AdamW weight_decay：", args.weight_decay)
+    print("四分类：", CLASS_NAMES, "初始化：", args.init, "AdamW weight_decay：", args.weight_decay,
+          "训练增强：", args.augmentation, "早停耐心值：", args.early_stopping_patience)
     model = build_resnet18(len(CLASS_NAMES), initialization=args.init)
-    output_dir = args.output_dir or PROJECT_ROOT / "runs" / f"resnet18_{args.init}_{datetime.now():%Y%m%d_%H%M%S}"
+    output_dir = args.output_dir or PROJECT_ROOT / "runs" / f"resnet18_four_{args.init}_{args.augmentation}_{datetime.now():%Y%m%d_%H%M%S}"
     run_training(
         model, train_loader, val_loader, weights, device,
         args.epochs, output_dir, args.lr, args.weight_decay, args.smoke_test,
+        args.early_stopping_patience,
     )
 
 

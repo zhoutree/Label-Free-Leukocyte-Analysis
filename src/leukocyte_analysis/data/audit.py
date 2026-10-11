@@ -8,7 +8,7 @@ from pathlib import Path
 import numpy as np
 
 from .bbbc045_config import (
-    CLASS_NAMES,
+    SOURCE_CLASS_NAMES,
     TEST_DONORS,
     TILE_SIZE,
     TRAIN_DONORS,
@@ -48,7 +48,7 @@ def _validate_records(records: list[dict[str, str]]) -> Counter:
 
         if split not in donor_groups or donor not in donor_groups[split]:
             raise ValueError(f"第 {index} 行的受试者划分不正确：{donor}, {split}")
-        if label not in CLASS_NAMES:
+        if label not in SOURCE_CLASS_NAMES:
             raise ValueError(f"第 {index} 行类别未知：{label}")
 
         row, col = int(record["row"]), int(record["col"])
@@ -108,7 +108,7 @@ def _inspect_tiles(
         }
         for label, values in std_by_class.items()
     }
-    if set(train_focus_by_class) != set(CLASS_NAMES):
+    if set(train_focus_by_class) != set(SOURCE_CLASS_NAMES):
         raise ValueError("训练集缺少某个类别，无法按类别校准清晰度代理阈值")
 
     # 每类只使用训练集分布定阈值；低分只是待核查候选，不等于已证实模糊。
@@ -129,7 +129,7 @@ def _inspect_tiles(
         "threshold_source": "每类训练图块清晰度代理分数的第 1 百分位",
         "thresholds": thresholds,
         "candidate_counts": {
-            split: {label: candidate_counts[(split, label)] for label in CLASS_NAMES}
+            split: {label: candidate_counts[(split, label)] for label in SOURCE_CLASS_NAMES}
             for split in ("train", "val")
         },
         "lowest_candidates": [
@@ -158,7 +158,7 @@ def audit_packed_data(split_csv: Path, tiles_npy: Path) -> dict:
         "counts": {
             split: {
                 label: counts[(split, label)]
-                for label in CLASS_NAMES
+                for label in SOURCE_CLASS_NAMES
             }
             for split in ("train", "val", "test")
         },
