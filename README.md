@@ -48,11 +48,11 @@ python -m leukocyte_analysis.train --init imagenet --lr 0.0001 --epochs 20 --bat
 
 完整训练默认加载 torchvision 的 ImageNet-1K ResNet-18 权重，优先复用项目 `data/pretrained/` 中的缓存；缓存不存在时需要联网下载。若已设置 `TORCH_HOME`，则尊重该位置。单通道 3×3 首层按 Kaiming 方式初始化，四分类头使用 PyTorch 默认初始化，其他层保留预训练参数并全部参与微调。默认学习率为 `0.0001`，最多训练 20 轮，AdamW 的 `weight_decay=0.01`（不是 L1 正则化）。合并 B/T 后，类别权重由四类训练集数量重新计算，不沿用旧五分类权重。
 
-默认 `--augmentation flips` 仅对训练图块做随机水平与垂直翻转；验证与测试集不增强。默认 `--early-stopping-patience 5`：验证 macro-F1 连续 5 轮未提高就提前结束，`0` 表示禁用。训练、进度条、日志和检查点由 Lightning 管理；macro-F1 与各类召回率由 TorchMetrics 计算。每次训练新建 `runs/resnet18_four_初始化方式_增强方式_时间戳/`，其中 `csv/metrics.csv` 是逐轮指标，`tensorboard/` 是曲线日志，`checkpoints/best.ckpt` 是按验证集 macro-F1 选出的权重。`last.ckpt` 是最近一次实际保存的检查点，可能与 `best.ckpt` 相同。测试集不参与训练或选择权重。
+默认 `--augmentation flips` 仅对训练图块做随机水平与垂直翻转；验证与测试集不增强。默认 `--early-stopping-patience 5`：验证 macro-F1 连续 5 轮未提高就提前结束，`0` 表示禁用。训练循环、Rich 终端进度条、日志和检查点由 Lightning 管理；macro-F1 与各类召回率由 TorchMetrics 计算。每次训练新建 `runs/resnet18_four_初始化方式_增强方式_时间戳/`，其中 `csv/metrics.csv` 是逐轮指标，`tensorboard/` 是曲线日志，`checkpoints/best.ckpt` 是按验证集 macro-F1 选出的权重。`last.ckpt` 是最近一次实际保存的检查点，可能与 `best.ckpt` 相同。测试集不参与训练或选择权重。
 
 此前的五分类运行目录和检查点没有删除，但新代码不再提供五分类训练或评估入口；旧权重不能直接当作四分类权重使用。早停主要减少最佳验证轮次之后的无效训练，并不保证提高最佳分数；轻量增强能否改善泛化，需要与同一四分类任务的基线比较后才能判断。四类与原五类的 macro-F1 分母不同，不能直接以高低判断模型是否改善。
 
-终端使用 Lightning 内置的进度条显示批次进度、当前加权训练损失及验证指标。训练时或训练后可另开终端运行：
+终端使用 Lightning 的 `RichProgressBar` 显示批次进度，并按实时窗口宽度逐级收起指标：窄窗口只保留轮次、横条和批次；中等宽度加入剩余时间及简短的 `loss`、`val_f1`；宽窗口再显示 `val_loss`。完整指标始终写入日志。极窄窗口或训练时频繁缩放仍可能造成显示残影。首次使用前，在已激活的环境中执行 `python -m pip install rich`；以后从更新后的 `environment.yml` 重建环境时会自动安装。训练时或训练后可另开终端运行：
 
 ```powershell
 tensorboard --logdir .\runs

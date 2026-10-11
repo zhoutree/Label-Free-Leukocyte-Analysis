@@ -15,6 +15,7 @@ from ..data.bbbc045_config import CLASS_NAMES
 from ..data.dataset import LeukocyteDataset
 from ..models.resnet import build_resnet18
 from ..training.module import LeukocyteClassifier
+from ..training.progress import CompactRichProgressBar, prepare_console_output
 from .plots import save_confusion_matrices, save_error_examples
 
 
@@ -40,11 +41,13 @@ def predict(model: LeukocyteClassifier, dataset: LeukocyteDataset, batch_size: i
     """由 Lightning 接管顺序推理，再将输出关联到清单索引。"""
     if tuple(model.class_names) != tuple(dataset.class_names):
         raise ValueError("模型与数据集的类别顺序不一致")
+    prepare_console_output()
     loader = DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=0,
                         pin_memory=device.type == "cuda")
     trainer = L.Trainer(
         accelerator="gpu" if device.type == "cuda" else "cpu", devices=1,
         logger=False, enable_checkpointing=False, enable_model_summary=False,
+        callbacks=[CompactRichProgressBar(refresh_rate=5)],
     )
     # predict_step 已把三个输出移至 CPU；测试集结果可安全保存在内存中。
     batches = trainer.predict(model, dataloaders=loader, return_predictions=True)

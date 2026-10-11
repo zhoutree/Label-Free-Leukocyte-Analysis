@@ -20,6 +20,7 @@ from leukocyte_analysis.data.dataset import LeukocyteDataset
 from leukocyte_analysis.models.resnet import build_resnet18
 from leukocyte_analysis.train import PROJECT_ROOT, parse_args
 from leukocyte_analysis.training.loaders import make_loaders
+from leukocyte_analysis.training.progress import CompactRichProgressBar
 
 
 class TestTrainingConfiguration(unittest.TestCase):
@@ -104,6 +105,24 @@ class TestTrainingConfiguration(unittest.TestCase):
             with patch("leukocyte_analysis.models.resnet.nn.init.kaiming_normal_") as initialize:
                 model = build_resnet18(4, initialization="random")
         initialize.assert_called_once_with(model.conv1.weight, mode="fan_out", nonlinearity="relu")
+
+    def test_rich_progress_adapts_metrics_to_terminal_width(self) -> None:
+        # 只改变终端显示，不改变日志中的完整指标名称。
+        reported = {"step_weighted_loss": 0.4, "val_loss": 0.2,
+                    "val_macro_f1": 0.8, "v_num": 1}
+        with patch("leukocyte_analysis.training.progress.RichProgressBar.get_metrics",
+                   return_value=reported):
+            progress = CompactRichProgressBar(refresh_rate=5)
+            progress._console = SimpleNamespace(width=160)
+            self.assertEqual(progress.get_metrics(None, None),
+                             {"loss": 0.4, "val_loss": 0.2, "val_f1": 0.8})
+            progress._console.width = 125
+            self.assertEqual(progress.get_metrics(None, None), {"loss": 0.4, "val_f1": 0.8})
+            progress._console.width = 95
+            self.assertEqual(progress.get_metrics(None, None), {"loss": 0.4})
+            progress._console.width = 60
+            self.assertEqual(progress.get_metrics(None, None), {})
+            self.assertEqual(str(progress.configure_columns(None)[-1].render(None)), "")
 
 
 class TestMetrics(unittest.TestCase):

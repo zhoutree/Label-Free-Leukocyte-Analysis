@@ -10,6 +10,7 @@ from torch import nn
 from torch.utils.data import DataLoader
 
 from .module import LeukocyteClassifier
+from .progress import CompactRichProgressBar, prepare_console_output
 
 
 def run_training(
@@ -28,11 +29,13 @@ def run_training(
     """按验证 macro-F1 选最佳权重；可提前停止，冒烟模式不保存文件。"""
     if early_stopping_patience < 0:
         raise ValueError("early_stopping_patience 不得小于 0")
+    prepare_console_output()
     module = LeukocyteClassifier(backbone, class_weights, learning_rate, weight_decay)
     checkpoint = None
+    # 使用 Lightning 的 Rich 进度条按终端宽度排版；限制刷新频率以减少重绘。
+    callbacks = [CompactRichProgressBar(refresh_rate=5)]
     if smoke_test:
         loggers = False
-        callbacks = []
     else:
         output_dir.mkdir(parents=True, exist_ok=False)
         # 两种日志由 Lightning 管理，不再手写 CSV 和 TensorBoard 事件。
@@ -50,7 +53,7 @@ def run_training(
             save_on_exception=True,
             enable_version_counter=False,
         )
-        callbacks = [checkpoint]
+        callbacks.append(checkpoint)
         if early_stopping_patience > 0:
             # 与最佳权重使用同一验证指标；连续若干次无提升后停止。
             callbacks.append(EarlyStopping(
