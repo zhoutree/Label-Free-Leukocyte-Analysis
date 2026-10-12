@@ -57,7 +57,7 @@ class PixelClassifier(nn.Module):
 
 class TestEvaluation(unittest.TestCase):
     def test_old_five_class_checkpoint_is_rejected(self) -> None:
-        # 旧权重保留在磁盘，但不能误用为四分类模型。
+        # 用合成的五输出层验证防误用逻辑，不依赖历史权重文件。
         saved = {"state_dict": {"backbone.fc.weight": torch.zeros(5, 512)},
                  "hyper_parameters": {"learning_rate": 1e-4}}
         with patch("leukocyte_analysis.evaluation.runner.torch.load", return_value=saved):

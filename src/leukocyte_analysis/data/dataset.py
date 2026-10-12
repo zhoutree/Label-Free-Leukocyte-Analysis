@@ -23,6 +23,7 @@ class LeukocyteDataset(Dataset):
         split: str,
         transform: Callable[[torch.Tensor], torch.Tensor] | None = None,
         include_index: bool = False,
+        raw_transform: Callable[[torch.Tensor], torch.Tensor] | None = None,
     ) -> None:
         if split not in {"train", "val", "test"}:
             raise ValueError(f"未知数据组：{split}")
@@ -31,6 +32,7 @@ class LeukocyteDataset(Dataset):
         class_to_index = {name: index for index, name in enumerate(self.class_names)}
         self.tiles_npy = tiles_npy.resolve()
         self.transform = transform
+        self.raw_transform = raw_transform
         self.include_index = include_index
         self._tiles = None  # 实际读取时才打开；各 DataLoader 进程分别映射。
         self.samples = []
@@ -84,13 +86,16 @@ class LeukocyteDataset(Dataset):
         packed_index, label, _donor = self.samples[index]
         tile = self._get_tiles()[packed_index]
 
-        # 归一化得到 1×55×55 的 float32 张量，不修改原始 .npy 文件。
-        normalized = ((tile - self.mean) / self.std).astype(
-            np.float32,
-            copy=True,
-        )
-        image = torch.from_numpy(normalized[None, :, :])
-        # 增强只由训练加载器传入；验证和测试图像保持原样。
+        # 亮度/对比度先作用于原始灰度值，再按训练集统计量归一化。
+        # 未启用时沿用原路径，使仅翻转基线的输入不变。
+        if self.raw_transform is None:
+            normalized = ((tile - self.mean) / self.std).astype(np.float32, copy=True)
+            image = torch.from_numpy(normalized[None, :, :])
+        else:
+            image = torch.from_numpy(np.array(tile[None, :, :], dtype=np.float32, copy=True))
+            image = self.raw_transform(image)
+            image = (image - self.mean) / self.std
+        # 几何增强只由训练加载器传入；验证和测试图像保持原样。
         if self.transform is not None:
             image = self.transform(image)
         if self.include_index:

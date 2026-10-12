@@ -67,6 +67,27 @@ class TestTrainingConfiguration(unittest.TestCase):
             # np.load(mmap_mode="r") 在 Windows 上需释放映射才能清理临时文件。
             del dataset, indexed
 
+    def test_raw_transform_precedes_normalization(self) -> None:
+        with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent) as temporary:
+            root = Path(temporary)
+            split_csv, tiles_npy, stats_json = (root / "split.csv", root / "tiles.npy",
+                                                root / "stats.json")
+            with split_csv.open("w", newline="", encoding="utf-8") as file:
+                writer = csv.DictWriter(file, fieldnames=("split", "label", "donor"))
+                writer.writeheader()
+                writer.writerow({"split": "train", "label": "B", "donor": "synthetic"})
+                writer.writerow({"split": "val", "label": "B", "donor": "synthetic2"})
+            np.save(tiles_npy, np.full((2, 55, 55), 2, dtype=np.float32))
+            stats_json.write_text(json.dumps({"mean": 2, "std": 2}), encoding="utf-8")
+
+            train = LeukocyteDataset(split_csv, tiles_npy, stats_json, "train",
+                                     raw_transform=lambda image: image + 2)
+            val = LeukocyteDataset(split_csv, tiles_npy, stats_json, "val")
+            self.assertEqual(float(train[0][0].mean()), 1.0)
+            self.assertEqual(float(val[0][0].mean()), 0.0)
+            self.assertEqual(tuple(train[0][0].shape), (1, 55, 55))
+            del train, val
+
     def test_random_initialization_can_be_selected(self) -> None:
         with patch.object(sys, "argv", ["leukocyte-train", "--init", "random", "--weight-decay", "0"]):
             args = parse_args()
@@ -89,6 +110,25 @@ class TestTrainingConfiguration(unittest.TestCase):
         self.assertNotIn("transform", dataset_type.call_args_list[1].kwargs)
         image = torch.arange(9).reshape(1, 3, 3)
         self.assertEqual(sorted(transform(image).flatten().tolist()), list(range(9)))
+
+    def test_photometric_augmentation_only_reaches_training_set(self) -> None:
+        training_set = SimpleNamespace(samples=[(index, index, "donor") for index in range(4)])
+        validation_set = SimpleNamespace(samples=[])
+        with patch("leukocyte_analysis.training.loaders.LeukocyteDataset",
+                   side_effect=[training_set, validation_set]) as dataset_type:
+            with patch("leukocyte_analysis.training.loaders.DataLoader",
+                       side_effect=[object(), object()]):
+                make_loaders(None, None, None, 8, 42, torch.device("cpu"),
+                             "flips_photometric")
+        train_kwargs = dataset_type.call_args_list[0].kwargs
+        val_kwargs = dataset_type.call_args_list[1].kwargs
+        self.assertIsNotNone(train_kwargs["transform"])
+        self.assertIsNotNone(train_kwargs["raw_transform"])
+        self.assertNotIn("raw_transform", val_kwargs)
+        self.assertNotIn("transform", val_kwargs)
+        transformed = train_kwargs["raw_transform"](torch.full((1, 55, 55), 0.003))
+        self.assertEqual(tuple(transformed.shape), (1, 55, 55))
+        self.assertEqual(transformed.dtype, torch.float32)
 
     def test_pretrained_backbone_and_small_image_layers(self) -> None:
         # 用本地构造的模型代替下载，验证传入的权重枚举与替换后的结构。

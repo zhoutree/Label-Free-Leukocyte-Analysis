@@ -21,15 +21,20 @@ def make_loaders(
     augmentation: str = "none",
 ) -> tuple[DataLoader, DataLoader, torch.Tensor]:
     """只增强训练集、只用训练标签计算权重；验证集保持原始分布。"""
-    if augmentation not in {"none", "flips"}:
+    if augmentation not in {"none", "flips", "flips_photometric"}:
         raise ValueError(f"未知增强方式：{augmentation}")
     # 翻转不会插值或裁掉 55×55 图中的细胞结构。
     train_transform = (
         v2.Compose([v2.RandomHorizontalFlip(), v2.RandomVerticalFlip()])
-        if augmentation == "flips" else None
+        if augmentation != "none" else None
+    )
+    raw_transform = (
+        v2.ColorJitter(brightness=(0.8, 1.25), contrast=(0.9, 1.1))
+        if augmentation == "flips_photometric" else None
     )
     common = (split_csv, tiles_npy, stats_json)
-    train_set = LeukocyteDataset(*common, "train", transform=train_transform)
+    train_set = LeukocyteDataset(*common, "train", transform=train_transform,
+                                 raw_transform=raw_transform)
     # 验证批次带上原始 CSV 行号；Lightning 回调据此保存逐图块错分。
     val_set = LeukocyteDataset(*common, "val", include_index=True)
     counts = Counter(label for _index, label, _donor in train_set.samples)

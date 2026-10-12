@@ -56,7 +56,9 @@ python -m leukocyte_analysis.train --init imagenet --lr 0.0001 --epochs 20 --bat
 
 默认 `--augmentation flips` 仅对训练图块做随机水平与垂直翻转；验证与测试集不增强。默认 `--early-stopping-patience 5`：验证 macro-F1 连续 5 轮未提高就提前结束，`0` 表示禁用。训练循环、Rich 终端进度条、日志和检查点由 Lightning 管理；macro-F1 与各类召回率由 TorchMetrics 计算。每次训练新建 `runs/resnet18_four_初始化方式_增强方式_时间戳/`，其中 `csv/metrics.csv` 是逐轮指标，`tensorboard/` 是曲线日志，`checkpoints/best.ckpt` 是按验证集 macro-F1 选出的权重。`last.ckpt` 是最近一次实际保存的检查点，可能与 `best.ckpt` 相同。测试集不参与训练或选择权重。
 
-此前的五分类运行目录和检查点没有删除，但新代码不再提供五分类训练或评估入口；旧权重不能直接当作四分类权重使用。早停主要减少最佳验证轮次之后的无效训练，并不保证提高最佳分数；轻量增强能否改善泛化，需要与同一四分类任务的基线比较后才能判断。四类与原五类的 macro-F1 分母不同，不能直接以高低判断模型是否改善。
+可选 `--augmentation flips_photometric`：除上述翻转外，使用 torchvision `ColorJitter` 对**训练图块的原始灰度值**随机施加 0.8–1.25 倍亮度、0.9–1.1 倍对比度，再沿用该折训练集的均值和标准差归一化。验证与测试图块仍只做原有归一化。这个范围是在查看既有验证集的亮度异常后选定的，因此下面的同折比较属于探索性分析，不应视为全新独立测试。
+
+当前只提供四分类训练与评估入口；旧五分类权重即使存在，也不能直接用于四分类。早停主要减少最佳验证轮次之后的无效训练，并不保证提高最佳分数。已完成的同折三折对照显示，加入亮度／对比度增强后，折外 macro-F1 从 0.9464 升至 0.9679，但个别受试者和采集批次退步；详情见[实验与异常记录](docs/bbbc045_test_audit.md)。这一对照不等于新的独立测试结果。
 
 终端使用 Lightning 的 `RichProgressBar` 显示批次进度，并按实时窗口宽度逐级收起指标：窄窗口只保留轮次、横条和批次；中等宽度加入剩余时间及简短的 `loss`、`val_f1`；宽窗口再显示 `val_loss`。完整指标始终写入日志。极窄窗口或训练时频繁缩放仍可能造成显示残影。首次使用前，在已激活的环境中执行 `python -m pip install rich`；以后从更新后的 `environment.yml` 重建环境时会自动安装。训练时或训练后可另开终端运行：
 
@@ -86,6 +88,12 @@ python -m leukocyte_analysis.cross_validate --smoke-test --init random --batch-s
 
 ```powershell
 python -m leukocyte_analysis.cross_validate --folds 3 --init imagenet --lr 0.0001 --epochs 20 --batch-size 128
+```
+
+亮度/对比度增强对照只改变训练增强方式，其余参数及受试者分折保持相同：
+
+```powershell
+python -m leukocyte_analysis.cross_validate --folds 3 --init imagenet --lr 0.0001 --epochs 20 --batch-size 128 --augmentation flips_photometric
 ```
 
 每次新建 `runs/cv_resnet18_.../`。`plan.json` 记录受试者分折，`fold_*/data/` 保存该折划分和训练集统计，`fold_*/training/` 保存日志及最佳检查点，`fold_*/validation_predictions.csv` 保存该折预测；`summary.json` 汇总折外准确率、macro-F1、各类指标和各受试者指标。这些验证结果用于比较训练方案；CRF049/CRF066 已经被查看过，不能再把它们当作新的独立最终测试。

@@ -26,8 +26,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--weight-decay", type=float, default=0.01, help="AdamW 权重衰减；不是 L1 正则化")
     parser.add_argument("--init", choices=("imagenet", "random"), default="imagenet", help="模型权重初始化方式")
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--augmentation", choices=("none", "flips"), default="flips",
-                        help="仅训练集增强；flips 为随机水平与垂直翻转")
+    parser.add_argument("--augmentation", choices=("none", "flips", "flips_photometric"),
+                        default="flips", help="训练集增强；flips_photometric 额外扰动原始灰度的亮度与对比度")
     parser.add_argument("--early-stopping-patience", type=int, default=5,
                         help="验证 macro-F1 连续多少轮未提高就停止；0 表示禁用")
     parser.add_argument("--smoke-test", action="store_true", help="只跑两批，不保存权重")

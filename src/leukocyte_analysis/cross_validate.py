@@ -20,7 +20,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--weight-decay", type=float, default=0.01)
     parser.add_argument("--init", choices=("imagenet", "random"), default="imagenet")
-    parser.add_argument("--augmentation", choices=("none", "flips"), default="flips")
+    parser.add_argument("--augmentation", choices=("none", "flips", "flips_photometric"),
+                        default="flips")
     parser.add_argument("--early-stopping-patience", type=int, default=5)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--smoke-test", action="store_true", help="仅检查第一折的两个训练和验证批次")
