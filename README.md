@@ -16,6 +16,7 @@ src/leukocyte_analysis/
   cross_validate.py             按受试者交叉验证入口
   evaluate.py                   训练完成后的测试集评估入口
   record_errors.py              从预测文件或检查点导出可定位的错分记录
+  brightness_stress.py           已训练交叉验证权重的亮度敏感性诊断入口
 data/processed/                 已处理图块、清单、划分和训练集统计
 data/pretrained/                官方预训练权重缓存（初次下载后复用）
 reports/                        审计结果及预览图
@@ -98,6 +99,17 @@ python -m leukocyte_analysis.cross_validate --folds 3 --init imagenet --lr 0.000
 
 每次新建 `runs/cv_resnet18_.../`。`plan.json` 记录受试者分折，`fold_*/data/` 保存该折划分和训练集统计，`fold_*/training/` 保存日志及最佳检查点，`fold_*/validation_predictions.csv` 保存该折预测；`summary.json` 汇总折外准确率、macro-F1、各类指标和各受试者指标。这些验证结果用于比较训练方案；CRF049/CRF066 已经被查看过，不能再把它们当作新的独立最终测试。
 
+两组交叉验证训练完成后，可用已有 `best.ckpt` 做**亮度压力测试**，不重新训练、不读取原测试受试者：
+
+```powershell
+python -m leukocyte_analysis.brightness_stress `
+  --baseline-run .\runs\cv_resnet18_imagenet_flips_20261011_213201 `
+  --augmented-run .\runs\cv_resnet18_imagenet_flips_photometric_20261012_111752 `
+  --output-dir .\runs\brightness_stress_20261012
+```
+
+默认将每折验证图块的原始灰度值分别乘以 0.8、1.0、1.2，随后使用**该折训练集**统计量归一化；1.0 保持原始推理路径。工具会核对两次运行的受试者分折和其他训练参数一致，并拒绝把 CRF049/CRF066 纳入诊断。输出 `overall.csv`、`per_class_recall.csv`、`by_donor.csv`、两张曲线图和设置记录。报告目录必须不存在，避免覆盖既有结果。此测试只衡量既有验证集上的亮度敏感性：亮度区间和增强方案都曾参考验证异常，结果仍是**探索性证据**，不是全新独立测试；若 1.0 的指标与各次运行的 `summary.json` 明显不同，应先核对数据与检查点版本。
+
 ## 最终测试评估
 
 先仅用训练/验证集确定实验配置和最佳模型，再用新四分类训练的 `best.ckpt` 对保留测试受试者评估一次。评估入口会拒绝旧五分类检查点：
@@ -124,7 +136,7 @@ python -m leukocyte_analysis.record_errors --split test --predictions-csv "$run\
 
 记录程序拒绝覆盖已有目标文件；人工核查时不要根据测试集错分调整模型后再把同一测试集称为独立最终测试。
 
-可选：若希望不再设置 `PYTHONPATH`，在已激活环境中执行 `python -m pip install --no-deps --no-build-isolation -e .`，此后可使用 `leukocyte-train`、`leukocyte-cross-validate`、`leukocyte-evaluate` 和 `leukocyte-record-errors` 命令。
+可选：若希望不再设置 `PYTHONPATH`，在已激活环境中执行 `python -m pip install --no-deps --no-build-isolation -e .`，此后可使用 `leukocyte-train`、`leukocyte-cross-validate`、`leukocyte-evaluate`、`leukocyte-record-errors` 和 `leukocyte-brightness-stress` 命令。
 
 运行不依赖完整数据集的单元测试：
 
