@@ -15,7 +15,7 @@ def parse_args() -> argparse.Namespace:
     """读取交叉验证设置；每折从头训练，不沿用上一折权重。"""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--folds", type=int, default=3)
-    parser.add_argument("--epochs", type=int, default=20)
+    parser.add_argument("--epochs", type=int, default=30)
     parser.add_argument("--batch-size", type=int, default=128)
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--lr-scheduler", choices=("none", "plateau"), default="plateau")
@@ -23,7 +23,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--init", choices=("imagenet", "random"), default="imagenet")
     parser.add_argument("--augmentation", choices=("none", "flips", "flips_photometric"),
                         default="flips_photometric")
-    parser.add_argument("--early-stopping-patience", type=int, default=5)
+    parser.add_argument("--early-stopping-patience", type=int, default=15)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--smoke-test", action="store_true", help="仅检查第一折的两个训练和验证批次")
     parser.add_argument("--split-csv", type=Path,

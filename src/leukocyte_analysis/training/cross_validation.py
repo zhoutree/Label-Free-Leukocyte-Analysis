@@ -8,7 +8,7 @@ import lightning as L
 import numpy as np
 import torch
 from ..data.bbbc045_config import (
-    CLASS_NAMES, TEST_DONORS, TRAIN_DONORS, VAL_DONORS,
+    CLASS_NAMES, CV_GROUP_OVERRIDES, TEST_DONORS, TRAIN_DONORS, VAL_DONORS,
 )
 from ..data.cv_split import build_donor_folds, write_fold_manifest
 from ..data.split import read_manifest
@@ -18,6 +18,9 @@ from ..evaluation.runner import load_classifier, predict
 from ..models.resnet import build_resnet18
 from .experiment import run_training
 from .loaders import make_loaders
+from .module import (
+    PLATEAU_COOLDOWN, PLATEAU_FACTOR, PLATEAU_MIN_LR_RATIO, PLATEAU_PATIENCE,
+)
 
 
 def _metrics(rows: list[dict]) -> dict:
@@ -38,6 +41,28 @@ def _write_predictions(path: Path, rows: list[dict]) -> None:
         writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
         writer.writeheader()
         writer.writerows(rows)
+
+
+def summarize_predictions(plan: dict, results: list[dict],
+                          all_predictions: list[dict], records: list[dict]) -> dict:
+    """检查折外覆盖范围，并汇总完整三折结果。"""
+    eligible_donors = TRAIN_DONORS | VAL_DONORS
+    if ({row["donor"] for row in all_predictions} != eligible_donors
+            or len(all_predictions) != sum(row["donor"] in eligible_donors for row in records)
+            or len({int(row["packed_index"]) for row in all_predictions}) != len(all_predictions)):
+        raise ValueError("折外预测缺少受试者或重复图块")
+    return {
+        "smoke_test": False,
+        "plan": plan,
+        "fold_results": results,
+        "out_of_fold": _metrics(all_predictions),
+        "fold_macro_f1_mean": float(np.mean([row["metrics"]["macro_f1"] for row in results])),
+        "fold_macro_f1_std": float(np.std([row["metrics"]["macro_f1"] for row in results])),
+        "by_donor": {
+            donor: _metrics([row for row in all_predictions if row["donor"] == donor])
+            for donor in sorted(eligible_donors)
+        },
+    }
 
 
 def run_cross_validation(
@@ -61,6 +86,7 @@ def run_cross_validation(
 
     plan = {
         "method": "StratifiedGroupKFold",
+        "group_overrides": CV_GROUP_OVERRIDES,
         "source_manifest": str(split_csv.resolve()),
         "packed_tiles": str(tiles_npy.resolve()),
         "excluded_donors": sorted(TEST_DONORS),
@@ -72,6 +98,10 @@ def run_cross_validation(
             "learning_rate": learning_rate, "weight_decay": weight_decay,
             "initialization": initialization, "augmentation": augmentation,
             "lr_scheduler": lr_scheduler,
+            "plateau_settings": {
+                "factor": PLATEAU_FACTOR, "patience": PLATEAU_PATIENCE,
+                "cooldown": PLATEAU_COOLDOWN, "min_lr_ratio": PLATEAU_MIN_LR_RATIO,
+            } if lr_scheduler == "plateau" else None,
             "early_stopping_patience": early_stopping_patience,
         },
         "folds": [
@@ -131,23 +161,7 @@ def run_cross_validation(
     if smoke_test:
         summary = {"smoke_test": True, "completed_folds": 1, "plan": plan}
     else:
-        eligible_donors = (TRAIN_DONORS | VAL_DONORS)
-        if ({row["donor"] for row in all_predictions} != eligible_donors
-                or len(all_predictions) != sum(row["donor"] in eligible_donors for row in records)
-                or len({row["packed_index"] for row in all_predictions}) != len(all_predictions)):
-            raise ValueError("折外预测缺少受试者或重复图块")
-        summary = {
-            "smoke_test": False,
-            "plan": plan,
-            "fold_results": results,
-            "out_of_fold": _metrics(all_predictions),
-            "fold_macro_f1_mean": float(np.mean([row["metrics"]["macro_f1"] for row in results])),
-            "fold_macro_f1_std": float(np.std([row["metrics"]["macro_f1"] for row in results])),
-            "by_donor": {
-                donor: _metrics([row for row in all_predictions if row["donor"] == donor])
-                for donor in sorted(eligible_donors)
-            },
-        }
+        summary = summarize_predictions(plan, results, all_predictions, records)
     (output_dir / "summary.json").write_text(
         json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8"
     )

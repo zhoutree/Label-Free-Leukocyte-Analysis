@@ -1,5 +1,6 @@
 """Lightning 回调：逐轮保存验证错分，并统计同一图块重复出错的次数。"""
 
+import csv
 from collections import Counter
 from pathlib import Path
 
@@ -25,6 +26,19 @@ class ValidationErrorLogger(L.Callback):
         self._current_errors: list[dict] = []
         self._history: dict[int, dict] = {}
         self._completed_epochs = 0
+        # 续训时从已有逐轮 CSV 恢复历史；旧检查点无需包含此回调状态。
+        for path in sorted(output_dir.glob("epoch_*.csv")):
+            with path.open(newline="", encoding="utf-8") as handle:
+                rows = list(csv.DictReader(handle))
+            self._completed_epochs += 1
+            for row in rows:
+                index = int(row["packed_index"])
+                row["packed_index"] = index
+                entry = self._history.setdefault(index, {
+                    "source": row, "epochs": [], "predictions": Counter(),
+                })
+                entry["epochs"].append(int(row["epoch"]))
+                entry["predictions"][row["predicted_label"]] += 1
 
     def on_validation_epoch_start(self, trainer, pl_module) -> None:
         self._current_errors = []
@@ -46,7 +60,10 @@ class ValidationErrorLogger(L.Callback):
             return
         epoch = trainer.current_epoch  # Lightning 使用从 0 开始的轮号。
         rows = misclassified_rows(self.dataset, self._current_errors, "val", epoch)
-        write_csv(self.output_dir / f"epoch_{epoch:03d}.csv", rows, ERROR_FIELDS)
+        path = self.output_dir / f"epoch_{epoch:03d}.csv"
+        if path.exists():
+            raise FileExistsError(f"不覆盖已有验证错分记录：{path}")
+        write_csv(path, rows, ERROR_FIELDS)
         self._completed_epochs += 1
 
         for row in rows:

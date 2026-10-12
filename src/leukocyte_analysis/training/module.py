@@ -10,6 +10,12 @@ from torchmetrics.classification import MulticlassF1Score, MulticlassRecall
 from ..data.bbbc045_config import CLASS_NAMES
 
 
+PLATEAU_FACTOR = 0.5
+PLATEAU_PATIENCE = 3
+PLATEAU_COOLDOWN = 2
+PLATEAU_MIN_LR_RATIO = 0.01
+
+
 class LeukocyteClassifier(L.LightningModule):
     """保留项目特有的加权损失；交由 Lightning 管理循环与设备。"""
 
@@ -108,8 +114,9 @@ class LeukocyteClassifier(L.LightningModule):
         if self.lr_scheduler == "none":
             return optimizer
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer, mode="max", factor=0.5, patience=1,
-            min_lr=self.learning_rate * 0.01,
+            optimizer, mode="max", factor=PLATEAU_FACTOR,
+            patience=PLATEAU_PATIENCE, cooldown=PLATEAU_COOLDOWN,
+            min_lr=self.learning_rate * PLATEAU_MIN_LR_RATIO,
         )
         return {"optimizer": optimizer, "lr_scheduler": {
             "scheduler": scheduler, "monitor": "val_macro_f1", "interval": "epoch",

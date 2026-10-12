@@ -1,5 +1,6 @@
 """配置 Lightning 训练器、标准日志和最佳模型检查点。"""
 
+import json
 from pathlib import Path
 
 import lightning as L
@@ -27,10 +28,18 @@ def run_training(
     smoke_test: bool = False,
     early_stopping_patience: int = 0,
     lr_scheduler: str = "none",
+    resume_checkpoint: Path | None = None,
+    data_split_record: dict | None = None,
 ) -> None:
     """按验证 macro-F1 选最佳权重；可提前停止，冒烟模式不保存文件。"""
     if early_stopping_patience < 0:
         raise ValueError("early_stopping_patience 不得小于 0")
+    if resume_checkpoint is not None and (smoke_test or not resume_checkpoint.is_file()):
+        raise ValueError("续训需要现存检查点，且不能使用冒烟模式")
+    if resume_checkpoint is not None and any(
+        (output_dir / name).exists() for name in ("csv", "tensorboard", "checkpoints")
+    ):
+        raise FileExistsError("续训输出目录已有训练日志或检查点")
     prepare_console_output()
     module = LeukocyteClassifier(backbone, class_weights, learning_rate, weight_decay,
                                  lr_scheduler=lr_scheduler)
@@ -40,7 +49,11 @@ def run_training(
     if smoke_test:
         loggers = False
     else:
-        output_dir.mkdir(parents=True, exist_ok=False)
+        output_dir.mkdir(parents=True, exist_ok=resume_checkpoint is not None)
+        if data_split_record is not None:
+            (output_dir / "data_split.json").write_text(
+                json.dumps(data_split_record, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
         # 两种日志由 Lightning 管理，不再手写 CSV 和 TensorBoard 事件。
         loggers = [
             TensorBoardLogger(output_dir, name="tensorboard", version="", default_hp_metric=False),
@@ -83,7 +96,8 @@ def run_training(
         log_every_n_steps=1,
         enable_model_summary=False,
     )
-    trainer.fit(module, train_dataloaders=train_loader, val_dataloaders=val_loader)
+    trainer.fit(module, train_dataloaders=train_loader, val_dataloaders=val_loader,
+                ckpt_path=str(resume_checkpoint) if resume_checkpoint else None)
     if smoke_test:
         print("冒烟测试通过：训练和验证各执行了两批，未保存权重。")
     else:

@@ -1,6 +1,7 @@
 """用少量合成样本验证 Lightning 的训练日志和检查点。"""
 
 import csv
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -19,6 +20,22 @@ from leukocyte_analysis.evaluation.runner import load_classifier
 
 
 class TestReporting(unittest.TestCase):
+    def test_regular_training_records_donor_grouping(self) -> None:
+        images = torch.zeros(4, 1)
+        targets = torch.arange(4)
+        loader = DataLoader(TensorDataset(images, targets), batch_size=4)
+        record = {"group_overrides": {"CRF101_2014": "CRF101"},
+                  "groups": [{"group": "CRF101", "split": "train",
+                              "donors": ["CRF101_2014", "CRF101_2015"], "tiles": 2}]}
+        with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent) as temporary:
+            output = Path(temporary) / "run"
+            with patch("leukocyte_analysis.training.experiment.L.Trainer"):
+                run_training(nn.Linear(1, 4), loader, loader, torch.ones(4),
+                             torch.device("cpu"), 1, output, 1e-4, 0.0,
+                             data_split_record=record)
+            self.assertEqual(json.loads((output / "data_split.json").read_text(
+                encoding="utf-8")), record)
+
     def test_four_class_module_uses_lymphocyte_metric(self) -> None:
         from leukocyte_analysis.training.module import LeukocyteClassifier
 
@@ -48,21 +65,63 @@ class TestReporting(unittest.TestCase):
             with patch("leukocyte_analysis.training.experiment.L.Trainer") as trainer:
                 run_training(nn.Linear(1, 4), loader, loader, torch.ones(4),
                              torch.device("cpu"), 20, Path(temporary) / "run",
-                             1e-4, 0.01, early_stopping_patience=5,
+                             1e-4, 0.01, early_stopping_patience=15,
                              lr_scheduler="plateau")
         callbacks = trainer.call_args.kwargs["callbacks"]
         early_stop = next(item for item in callbacks if isinstance(item, EarlyStopping))
         self.assertEqual(early_stop.monitor, "val_macro_f1")
-        self.assertEqual(early_stop.patience, 5)
+        self.assertEqual(early_stop.patience, 15)
         self.assertTrue(any(isinstance(item, LearningRateMonitor) for item in callbacks))
         module = trainer.return_value.fit.call_args.args[0]
         configured = module.configure_optimizers()
         self.assertEqual(configured["lr_scheduler"]["monitor"], "val_macro_f1")
         scheduler = configured["lr_scheduler"]["scheduler"]
         self.assertIsInstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau)
-        for _ in range(3):
+        self.assertEqual((scheduler.patience, scheduler.cooldown), (3, 2))
+        for _ in range(5):
             scheduler.step(0.5)
         self.assertAlmostEqual(configured["optimizer"].param_groups[0]["lr"], 5e-5)
+
+    def test_resume_passes_checkpoint_to_lightning(self) -> None:
+        images = torch.zeros(4, 1)
+        targets = torch.arange(4)
+        loader = DataLoader(TensorDataset(images, targets), batch_size=4)
+        with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent) as temporary:
+            root = Path(temporary)
+            checkpoint = root / "last.ckpt"
+            checkpoint.touch()
+            with patch("leukocyte_analysis.training.experiment.L.Trainer") as trainer:
+                run_training(nn.Linear(1, 4), loader, loader, torch.ones(4),
+                             torch.device("cpu"), 30, root / "continued", 1e-4, 0.01,
+                             early_stopping_patience=5, lr_scheduler="plateau",
+                             resume_checkpoint=checkpoint)
+            self.assertEqual(trainer.return_value.fit.call_args.kwargs["ckpt_path"],
+                             str(checkpoint))
+
+    def test_resume_into_new_directory_keeps_original_checkpoint(self) -> None:
+        images = torch.arange(8, dtype=torch.float32).reshape(-1, 1) / 8
+        targets = torch.arange(8) % 4
+        loader = DataLoader(TensorDataset(images, targets), batch_size=4)
+        with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent) as temporary:
+            root = Path(temporary)
+            first = root / "first"
+            continued = root / "continued"
+            run_training(nn.Linear(1, 4), loader, loader, torch.ones(4),
+                         torch.device("cpu"), 1, first, 0.01, 0.0,
+                         early_stopping_patience=5, lr_scheduler="plateau")
+            last = first / "checkpoints" / "last.ckpt"
+            original = last.read_bytes()
+            run_training(nn.Linear(1, 4), loader, loader, torch.ones(4),
+                         torch.device("cpu"), 2, continued, 0.01, 0.0,
+                         early_stopping_patience=5, lr_scheduler="plateau",
+                         resume_checkpoint=last)
+            self.assertEqual(last.read_bytes(), original)
+            self.assertTrue((continued / "checkpoints" / "last.ckpt").is_file())
+            with (continued / "csv" / "metrics.csv").open(
+                newline="", encoding="utf-8"
+            ) as handle:
+                self.assertIn("1", {row["epoch"] for row in csv.DictReader(handle)
+                                    if row["val_macro_f1"]})
 
     def test_indexed_validation_loader_gets_error_callback(self) -> None:
         images = torch.zeros(4, 1)

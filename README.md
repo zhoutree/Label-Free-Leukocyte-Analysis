@@ -14,6 +14,7 @@ src/leukocyte_analysis/
   evaluation/                   独立测试推理、指标和图像报告
   train.py                      命令行入口
   cross_validate.py             按受试者交叉验证入口
+  resume_cv.py                  指定一折从 last.ckpt 续训入口
   evaluate.py                   训练完成后的测试集评估入口
   record_errors.py              从预测文件或检查点导出可定位的错分记录
   brightness_stress.py           已训练交叉验证权重的亮度敏感性诊断入口
@@ -36,6 +37,7 @@ tests/                          不依赖完整数据集的自动化测试
 - `data/processed/bbbc045_tiles.npy`：100,105 个 55×55 明场图块；第 `i` 个图块对应清单第 `i` 行。
 - `data/processed/bbbc045_manifest.csv`：图块来源、受试者、类别和网格位置。
 - `data/processed/bbbc045_split.csv`：在清单基础上增加 train/val/test 划分。清单始终保留原始 B/T 标签；训练加载时才映射为四类，不需重新裁切或打包。
+- `CRF101_2014` 和 `CRF101_2015` 共用 CRF101 编号；官方资料尚未明确核实是否同一人，因此保守地视作同一划分组。当前固定划分中两者均在训练集。今后的常规训练即使用自定义 `--split-csv`，启动前也会拒绝把它们分到不同的 train/val/test 侧；交叉验证同样保持同折。
 - `data/processed/bbbc045_train_stats.json`：仅由训练集计算的归一化参数。
 - `reports/bbbc045_audit.json`：此前的基础审计；`reports/bbbc045_audit_focus.json`：新版审计，以每类训练图块的清晰度代理分数第 1 百分位标记 train/val 低细节候选，不自动删除样本，也不能确认多细胞或错标；`reports/previews/`：预览图。
 
@@ -51,14 +53,15 @@ python -m leukocyte_analysis.train --smoke-test --batch-size 8 --init random
 确认无误后运行带光度增强、学习率调度与早停的下一次完整训练：
 
 ```powershell
-python -m leukocyte_analysis.train --init imagenet --lr 0.0001 --epochs 20 --batch-size 128
+python -m leukocyte_analysis.train --init imagenet --lr 0.0001 --epochs 30 --batch-size 128
 ```
 
-完整训练默认加载 torchvision 的 ImageNet-1K ResNet-18 权重，优先复用项目 `data/pretrained/` 中的缓存；缓存不存在时需要联网下载。若已设置 `TORCH_HOME`，则尊重该位置。单通道 3×3 首层按 Kaiming 方式初始化，四分类头使用 PyTorch 默认初始化，其他层保留预训练参数并全部参与微调。默认学习率为 `0.0001`，最多训练 20 轮，AdamW 的 `weight_decay=0.01`（不是 L1 正则化）。合并 B/T 后，类别权重由四类训练集数量重新计算，不沿用旧五分类权重。
+完整训练默认加载 torchvision 的 ImageNet-1K ResNet-18 权重，优先复用项目 `data/pretrained/` 中的缓存；缓存不存在时需要联网下载。若已设置 `TORCH_HOME`，则尊重该位置。单通道 3×3 首层按 Kaiming 方式初始化，四分类头使用 PyTorch 默认初始化，其他层保留预训练参数并全部参与微调。默认学习率为 `0.0001`，最多训练 30 轮，AdamW 的 `weight_decay=0.01`（不是 L1 正则化）。合并 B/T 后，类别权重由四类训练集数量重新计算，不沿用旧五分类权重。
 
-默认 `--augmentation flips_photometric`：只对训练图块做随机水平／垂直翻转，并用 torchvision `ColorJitter` 对原始灰度施加 0.8–1.25 倍亮度、0.9–1.1 倍对比度，再按训练集均值和标准差归一化；验证与测试集不增强。旧仅翻转实验仍可用 `--augmentation flips` 复现。默认 `--early-stopping-patience 5`：验证 macro-F1 连续 5 轮未提高就提前结束，`0` 表示禁用。训练循环、Rich 终端进度条、日志和检查点由 Lightning 管理；macro-F1 与各类召回率由 TorchMetrics 计算。每次训练新建 `runs/resnet18_four_初始化方式_增强方式_调度方式_时间戳/`，其中 `csv/metrics.csv` 是逐轮指标，`tensorboard/` 是曲线日志，`checkpoints/best.ckpt` 是按验证集 macro-F1 选出的权重。`last.ckpt` 是最近一次实际保存的检查点，可能与 `best.ckpt` 相同。测试集不参与训练或选择权重。
+默认 `--augmentation flips_photometric`：只对训练图块做随机水平／垂直翻转，并用 torchvision `ColorJitter` 对原始灰度施加 0.8–1.25 倍亮度、0.9–1.1 倍对比度，再按训练集均值和标准差归一化；验证与测试集不增强。旧仅翻转实验仍可用 `--augmentation flips` 复现。默认 `--early-stopping-patience 15`：验证 macro-F1 连续 15 轮未提高就提前结束，`0` 表示禁用。训练循环、Rich 终端进度条、日志和检查点由 Lightning 管理；macro-F1 与各类召回率由 TorchMetrics 计算。每次训练新建 `runs/resnet18_four_初始化方式_增强方式_调度方式_时间戳/`，其中 `csv/metrics.csv` 是逐轮指标，`tensorboard/` 是曲线日志，`checkpoints/best.ckpt` 是按验证集 macro-F1 选出的权重。`last.ckpt` 是最近一次实际保存的检查点，可能与 `best.ckpt` 相同。测试集不参与训练或选择权重。
+常规训练还会在该运行目录写入 `data_split.json`，记录所用清单、CRF101 合并分组规则、每组目录标识及 train/val/test 归属和图块数量；这只记录划分，不复制原始图像。
 
-默认 `--lr-scheduler plateau`：验证 macro-F1 连续两轮未创新高后，下一轮学习率减半，最低为初始值的 1%；Lightning 每轮记录学习率。旧固定学习率实验可用 `--lr-scheduler none` 复现。标签平滑保持关闭（交叉熵默认 `label_smoothing=0`），以便新实验只检验学习率调度。先前 0.9893 的折外准确率来自**光度增强＋固定学习率**，并非新调度方案的成绩。光度增强范围曾参考旧验证异常，因此同折比较属于探索性分析，不是全新独立测试。
+默认 `--lr-scheduler plateau`：验证 macro-F1 连续四次检查未刷新调度器最佳值时学习率减半，随后冷却两轮，最低为初始值的 1%；Lightning 每轮记录学习率。早停仍独立计数，不因降学习率而重置。可用 `--lr-scheduler none` 运行固定学习率对照。标签平滑保持关闭（交叉熵默认 `label_smoothing=0`）。先前 0.9893 的折外准确率来自**光度增强＋固定学习率**，并非新调度方案的成绩；旧实验采用不同分折和训练耐心值，不能与今后的运行当作单变量对照。光度增强范围曾参考旧验证异常，因此同折比较属于探索性分析，不是全新独立测试。
 
 当前只提供四分类训练与评估入口；旧五分类权重即使存在，也不能直接用于四分类。早停主要减少最佳验证轮次之后的无效训练，并不保证提高最佳分数。亮度审计、增强对照与压力测试的结果和解释统一见[亮度实验汇总](docs/bbbc045_brightness_findings.md)；测试错分及标签来源核查见[测试与标签异常记录](docs/bbbc045_test_audit.md)。
 
@@ -76,7 +79,7 @@ tensorboard --logdir .\runs
 
 ## 按受试者交叉验证
 
-交叉验证只使用原 train＋val 的 11 名受试者，默认分为 3 折。每折从 ImageNet 权重重新初始化模型，并仅用该折训练受试者重算像素均值、标准差和类别权重；同一人不会同时出现在训练与验证中。CRF022 正常参与交叉验证；**CRF049 和 CRF066 继续保持原测试划分**，只是为了让下一次实验与旧折外基线可比，**不是将它们认定为坏数据或错标而筛除**。折内 CSV 保留全部原行及索引，但测试受试者标为 `excluded`，不会被训练或验证数据加载器读取。
+交叉验证只使用原 train＋val 的 11 个目录标识，默认分为 3 折。`CRF101_2014` 与 `CRF101_2015` 共用 CRF101 编号；官方资料未明确核实两者是否同一人，因此**今后的分折保守地把两者视为同一组**（可用分组共 10 个），绝不分放训练和验证侧。每折从 ImageNet 权重重新初始化模型，并仅用该折训练图块重算像素均值、标准差和类别权重。CRF022 正常参与交叉验证；**CRF049 和 CRF066 继续保持原测试划分**，只是为了让下一次实验与旧折外基线可比，**不是将它们认定为坏数据或错标而筛除**。折内 CSV 保留全部原行及索引，但测试受试者标为 `excluded`，不会被训练或验证数据加载器读取。旧运行的 `plan.json` 和指标仍按原分折解释，不与新分折成绩直接作受控对比。
 
 当前没有针对 `CRF049/monocyte` 的额外质量屏蔽规则；高错分率和亮度敏感性都不能证明官方标签错误。若今后决定改变受试者划分，可将 CRF049 作为一个完整受试者纳入新训练／验证方案，并从新的训练集重新计算归一化参数和类别权重；但那将是**新的数据划分**，不能与旧 11 人折外成绩直接比较，也不能再把已多次查看的 CRF049 当作未使用过的独立测试集。
 
@@ -86,19 +89,27 @@ tensorboard --logdir .\runs
 python -m leukocyte_analysis.cross_validate --smoke-test --init random --batch-size 8
 ```
 
-再运行完整的三折学习率调度实验；每折最多 20 轮，耗时约为单次训练的三倍，不会由上述冒烟命令自动启动。命令显式列出关键选项以便与旧光度增强＋固定学习率实验比较：
+再运行按新 CRF101 同组规则分折的完整实验；每折最多 30 轮，耗时可能明显增加，不会由上述冒烟命令自动启动。命令显式列出关键选项以便复现本次配置：
 
 ```powershell
-python -m leukocyte_analysis.cross_validate --folds 3 --init imagenet --lr 0.0001 --epochs 20 --batch-size 128 --augmentation flips_photometric --lr-scheduler plateau
+python -m leukocyte_analysis.cross_validate --folds 3 --init imagenet --lr 0.0001 --epochs 30 --batch-size 128 --augmentation flips_photometric --lr-scheduler plateau
 ```
 
-如需重跑旧光度增强基线，其他设置不变、仅关闭调度：
+如需在**同一新分折**下比较固定学习率，其他设置不变、仅关闭调度：
 
 ```powershell
-python -m leukocyte_analysis.cross_validate --folds 3 --init imagenet --lr 0.0001 --epochs 20 --batch-size 128 --augmentation flips_photometric --lr-scheduler none
+python -m leukocyte_analysis.cross_validate --folds 3 --init imagenet --lr 0.0001 --epochs 30 --batch-size 128 --augmentation flips_photometric --lr-scheduler none
 ```
 
 每次新建 `runs/cv_resnet18_.../`。`plan.json` 记录受试者分折，`fold_*/data/` 保存该折划分和训练集统计，`fold_*/training/` 保存日志及最佳检查点，`fold_*/validation_predictions.csv` 保存该折预测；`summary.json` 汇总折外准确率、macro-F1、各类指标和各受试者指标。这些验证结果用于比较训练方案；CRF049/CRF066 已经被查看过，不能再把它们当作新的独立最终测试。
+
+若仅要检查本次 Plateau 实验中**第 2 折**是否被 20 轮上限截断，可从其 `last.ckpt` 续训到**总计最多 30 轮**；第 1、3 折不重跑，原运行目录保持不变：
+
+```powershell
+python -m leukocyte_analysis.resume_cv --source-run ".\runs\cv_resnet18_imagenet_flips_photometric_plateau_20261012_204944" --fold 2 --epochs 30
+```
+
+续训结果进入新建的 `runs/cv_fold02_extended_.../`：保留旧折预测，比较第 2 折旧／新最佳权重的验证 macro-F1，并重新汇总折外指标。`--epochs 30` 是总轮数上限，不是再加 30 轮；早停仍生效。由于 DataLoader 的独立随机生成器未保存在旧检查点，续训不保证与一次性训练 30 轮逐位一致。这个延长轮数的分析仍使用已反复查看的交叉验证数据，属于探索性比较。
 
 两组交叉验证训练完成后，可用已有 `best.ckpt` 做**亮度压力测试**，不重新训练、不读取原测试受试者：
 

@@ -22,3 +22,11 @@ TRAIN_DONORS = frozenset({
 })
 VAL_DONORS = frozenset({"CRF034", "CRF102"})
 TEST_DONORS = frozenset({"CRF049", "CRF066"})
+
+# 两个年份的目录共用 CRF101 编号；身份未获官方明确核实，所有训练划分保守地同组处理。
+CV_GROUP_OVERRIDES = {"CRF101_2014": "CRF101", "CRF101_2015": "CRF101"}
+
+
+def cv_group(donor: str) -> str:
+    """返回训练划分分组编号；不改原始清单中的目录标识。"""
+    return CV_GROUP_OVERRIDES.get(donor, donor)

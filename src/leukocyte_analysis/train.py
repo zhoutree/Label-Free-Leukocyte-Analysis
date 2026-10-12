@@ -8,7 +8,8 @@ from pathlib import Path
 import lightning as L
 import torch
 
-from .data.bbbc045_config import CLASS_NAMES
+from .data.bbbc045_config import CLASS_NAMES, CV_GROUP_OVERRIDES
+from .data.split import read_manifest, summarize_split_groups
 from .models.resnet import build_resnet18
 from .training.experiment import run_training
 from .training.loaders import make_loaders
@@ -20,7 +21,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 def parse_args() -> argparse.Namespace:
     """读取命令行参数，并检查训练配置是否合法。"""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--epochs", type=int, default=20)
+    parser.add_argument("--epochs", type=int, default=30)
     parser.add_argument("--batch-size", type=int, default=128)
     parser.add_argument("--lr", type=float, default=1e-4, help="AdamW 学习率；ImageNet 微调基线默认 0.0001")
     parser.add_argument("--lr-scheduler", choices=("none", "plateau"), default="plateau",
@@ -30,7 +31,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--augmentation", choices=("none", "flips", "flips_photometric"),
                         default="flips_photometric", help="训练集增强；默认同时扰动原始灰度的亮度与对比度")
-    parser.add_argument("--early-stopping-patience", type=int, default=5,
+    parser.add_argument("--early-stopping-patience", type=int, default=15,
                         help="验证 macro-F1 连续多少轮未提高就停止；0 表示禁用")
     parser.add_argument("--smoke-test", action="store_true", help="只跑两批，不保存权重")
     parser.add_argument("--split-csv", type=Path, default=PROJECT_ROOT / "data/processed/bbbc045_split.csv")
@@ -47,6 +48,9 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     """连接数据、模型、优化器与训练流程；不读取测试集。"""
     args = parse_args()
+    _, records = read_manifest(args.split_csv)
+    split_groups = summarize_split_groups(records)
+    print("CRF101 同组规则：", CV_GROUP_OVERRIDES)
     L.seed_everything(args.seed, workers=True)
     # 优先使用项目内的官方权重缓存；用户显式设置 TORCH_HOME 时尊重其选择。
     if args.init == "imagenet":
@@ -69,6 +73,11 @@ def main() -> None:
         model, train_loader, val_loader, weights, device,
         args.epochs, output_dir, args.lr, args.weight_decay, args.smoke_test,
         args.early_stopping_patience, lr_scheduler=args.lr_scheduler,
+        data_split_record={
+            "source_manifest": str(args.split_csv.resolve()),
+            "group_overrides": CV_GROUP_OVERRIDES,
+            "groups": split_groups,
+        },
     )
 
 

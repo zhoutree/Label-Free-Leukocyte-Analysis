@@ -5,7 +5,7 @@ import tempfile
 from collections import Counter
 from pathlib import Path
 
-from .bbbc045_config import TEST_DONORS, TRAIN_DONORS, VAL_DONORS
+from .bbbc045_config import TEST_DONORS, TRAIN_DONORS, VAL_DONORS, cv_group
 
 
 def read_manifest(path: Path) -> tuple[list[str], list[dict[str, str]]]:
@@ -20,6 +20,24 @@ def read_manifest(path: Path) -> tuple[list[str], list[dict[str, str]]]:
     if not records:
         raise ValueError("划分清单为空")
     return fields, records
+
+
+def summarize_split_groups(records: list[dict[str, str]]) -> list[dict]:
+    """核对同组目录没有跨数据组，并生成可写入训练记录的摘要。"""
+    groups: dict[str, dict] = {}
+    for row in records:
+        donor, split = row["donor"], row["split"]
+        if split not in {"train", "val", "test"}:
+            raise ValueError(f"未知数据组：{split}")
+        group = cv_group(donor)
+        summary = groups.setdefault(group, {"group": group, "split": split,
+                                            "donors": set(), "tiles": 0})
+        if summary["split"] != split:
+            raise ValueError(f"同一受试者分组 {group} 被拆到 {summary['split']} 和 {split}")
+        summary["donors"].add(donor)
+        summary["tiles"] += 1
+    return [{**groups[group], "donors": sorted(groups[group]["donors"])}
+            for group in sorted(groups)]
 
 
 def split_for_donor(donor: str) -> str:
@@ -42,6 +60,12 @@ def write_split_manifest(manifest_csv: Path, output_csv: Path) -> Counter:
         or VAL_DONORS & TEST_DONORS
     ):
         raise ValueError("训练、验证、测试受试者名单有重叠")
+    summarize_split_groups([
+        {"donor": donor, "split": split}
+        for split, donors in (("train", TRAIN_DONORS), ("val", VAL_DONORS),
+                              ("test", TEST_DONORS))
+        for donor in donors
+    ])
 
     output_csv.parent.mkdir(parents=True, exist_ok=True)
     if output_csv.exists():

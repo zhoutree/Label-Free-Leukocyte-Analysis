@@ -17,6 +17,7 @@ from torchvision.models import ResNet18_Weights, resnet18
 
 from leukocyte_analysis.data.bbbc045_config import CLASS_NAMES, model_label
 from leukocyte_analysis.data.dataset import LeukocyteDataset
+from leukocyte_analysis.data.split import split_for_donor, summarize_split_groups
 from leukocyte_analysis.models.resnet import build_resnet18
 from leukocyte_analysis.cross_validate import parse_args as parse_cv_args
 from leukocyte_analysis.train import PROJECT_ROOT, parse_args
@@ -35,7 +36,8 @@ class TestTrainingConfiguration(unittest.TestCase):
         self.assertEqual(args.weight_decay, 0.01)
         self.assertEqual(args.augmentation, "flips_photometric")
         self.assertEqual(args.lr_scheduler, "plateau")
-        self.assertEqual(args.early_stopping_patience, 5)
+        self.assertEqual(args.epochs, 30)
+        self.assertEqual(args.early_stopping_patience, 15)
         self.assertFalse(hasattr(args, "task"))
 
     def test_cross_validation_defaults_and_old_baseline_remain_selectable(self) -> None:
@@ -43,6 +45,7 @@ class TestTrainingConfiguration(unittest.TestCase):
             args = parse_cv_args()
         self.assertEqual((args.augmentation, args.lr_scheduler),
                          ("flips_photometric", "plateau"))
+        self.assertEqual((args.epochs, args.early_stopping_patience), (30, 15))
         with patch.object(sys, "argv", ["leukocyte-train", "--augmentation", "flips",
                                             "--lr-scheduler", "none"]):
             old = parse_args()
@@ -55,6 +58,24 @@ class TestTrainingConfiguration(unittest.TestCase):
         self.assertEqual(model_label("T"), "lymphocyte")
         with self.assertRaises(ValueError):
             model_label("unknown")
+
+    def test_crf101_years_stay_together_in_regular_training(self) -> None:
+        self.assertEqual(split_for_donor("CRF101_2014"), "train")
+        self.assertEqual(split_for_donor("CRF101_2015"), "train")
+        records = [
+            {"donor": "CRF101_2014", "split": "train"},
+            {"donor": "CRF101_2015", "split": "train"},
+            {"donor": "CRF049", "split": "test"},
+        ]
+        groups = summarize_split_groups(records)
+        self.assertIn({"group": "CRF101", "split": "train",
+                       "donors": ["CRF101_2014", "CRF101_2015"], "tiles": 2}, groups)
+        records[1]["split"] = "val"
+        with self.assertRaisesRegex(ValueError, "CRF101"):
+            summarize_split_groups(records)
+        records[1]["split"] = "test"
+        with self.assertRaisesRegex(ValueError, "CRF101"):
+            summarize_split_groups(records)
 
     def test_dataset_maps_b_and_t_without_rewriting_manifest(self) -> None:
         # 合成清单保持原始 B/T 标签，模型读取时统一合并。

@@ -9,7 +9,7 @@ from pathlib import Path
 import numpy as np
 from sklearn.model_selection import StratifiedGroupKFold
 
-from .bbbc045_config import TEST_DONORS, model_label
+from .bbbc045_config import TEST_DONORS, cv_group, model_label
 from .split import read_manifest as read_manifest
 
 
@@ -29,18 +29,20 @@ def build_donor_folds(
         raise ValueError("交叉验证至少需要 2 折")
     eligible = [row for row in records if row["donor"] not in excluded_donors]
     donors = {row["donor"] for row in eligible}
-    if n_splits > len(donors):
-        raise ValueError("折数不能超过可用受试者人数")
+    group_ids = {cv_group(donor) for donor in donors}
+    if n_splits > len(group_ids):
+        raise ValueError("折数不能超过可用受试者分组数")
 
     labels = [model_label(row["label"]) for row in eligible]
-    groups = [row["donor"] for row in eligible]
+    groups = [cv_group(row["donor"]) for row in eligible]
     splitter = StratifiedGroupKFold(n_splits=n_splits, shuffle=True, random_state=seed)
     folds = []
     seen_validation = set()
     for number, (_train_indices, val_indices) in enumerate(
         splitter.split(np.zeros(len(eligible)), labels, groups), start=1
     ):
-        val_donors = frozenset(groups[index] for index in val_indices)
+        val_groups = {groups[index] for index in val_indices}
+        val_donors = frozenset(donor for donor in donors if cv_group(donor) in val_groups)
         train_donors = frozenset(donors - val_donors)
         if not val_donors or not train_donors or seen_validation & val_donors:
             raise ValueError("受试者分折不完整或重复")
