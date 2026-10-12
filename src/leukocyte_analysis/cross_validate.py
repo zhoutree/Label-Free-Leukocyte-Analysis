@@ -18,10 +18,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--epochs", type=int, default=20)
     parser.add_argument("--batch-size", type=int, default=128)
     parser.add_argument("--lr", type=float, default=1e-4)
+    parser.add_argument("--lr-scheduler", choices=("none", "plateau"), default="plateau")
     parser.add_argument("--weight-decay", type=float, default=0.01)
     parser.add_argument("--init", choices=("imagenet", "random"), default="imagenet")
     parser.add_argument("--augmentation", choices=("none", "flips", "flips_photometric"),
-                        default="flips")
+                        default="flips_photometric")
     parser.add_argument("--early-stopping-patience", type=int, default=5)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--smoke-test", action="store_true", help="仅检查第一折的两个训练和验证批次")
@@ -44,7 +45,7 @@ def main() -> None:
         os.environ.setdefault("TORCH_HOME", str(PROJECT_ROOT / "data/pretrained"))
     output_dir = args.output_dir or (
         PROJECT_ROOT / "runs"
-        / f"cv_resnet18_{args.init}_{args.augmentation}_{datetime.now():%Y%m%d_%H%M%S}"
+        / f"cv_resnet18_{args.init}_{args.augmentation}_{args.lr_scheduler}_{datetime.now():%Y%m%d_%H%M%S}"
     )
     summary = run_cross_validation(
         args.split_csv, args.tiles_npy, output_dir,
@@ -52,6 +53,7 @@ def main() -> None:
         batch_size=args.batch_size, learning_rate=args.lr,
         weight_decay=args.weight_decay, initialization=args.init,
         augmentation=args.augmentation,
+        lr_scheduler=args.lr_scheduler,
         early_stopping_patience=args.early_stopping_patience,
         smoke_test=args.smoke_test,
     )

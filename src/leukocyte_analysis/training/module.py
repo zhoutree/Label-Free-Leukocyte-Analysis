@@ -19,16 +19,20 @@ class LeukocyteClassifier(L.LightningModule):
         class_weights: torch.Tensor,
         learning_rate: float,
         weight_decay: float,
+        lr_scheduler: str = "none",
     ) -> None:
         super().__init__()
         if len(CLASS_NAMES) != len(class_weights):
             raise ValueError("类别名称数量与类别权重数量不一致")
+        if lr_scheduler not in {"none", "plateau"}:
+            raise ValueError(f"未知学习率调度方式：{lr_scheduler}")
         self.save_hyperparameters(ignore=("backbone", "class_weights"))
         self.backbone = backbone
         self.class_names = CLASS_NAMES
         self.register_buffer("class_weights", class_weights.detach().clone())
         self.learning_rate = learning_rate
         self.weight_decay = weight_decay
+        self.lr_scheduler = lr_scheduler
 
         self.train_loss = MeanMetric()
         self.train_weighted_loss = MeanMetric()
@@ -97,7 +101,16 @@ class LeukocyteClassifier(L.LightningModule):
             self.log(f"val_recall_{name}", recalls[index], on_step=False, on_epoch=True)
         self.val_recall.reset()
 
-    def configure_optimizers(self) -> torch.optim.Optimizer:
-        """优化器由 Lightning 在适当设备上创建和运行。"""
-        return torch.optim.AdamW(self.backbone.parameters(), lr=self.learning_rate,
-                                 weight_decay=self.weight_decay)
+    def configure_optimizers(self) -> torch.optim.Optimizer | dict:
+        """由 Lightning 根据验证 macro-F1 自动调整学习率。"""
+        optimizer = torch.optim.AdamW(self.backbone.parameters(), lr=self.learning_rate,
+                                      weight_decay=self.weight_decay)
+        if self.lr_scheduler == "none":
+            return optimizer
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer, mode="max", factor=0.5, patience=1,
+            min_lr=self.learning_rate * 0.01,
+        )
+        return {"optimizer": optimizer, "lr_scheduler": {
+            "scheduler": scheduler, "monitor": "val_macro_f1", "interval": "epoch",
+        }}

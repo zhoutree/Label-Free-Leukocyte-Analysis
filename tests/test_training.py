@@ -18,6 +18,7 @@ from torchvision.models import ResNet18_Weights, resnet18
 from leukocyte_analysis.data.bbbc045_config import CLASS_NAMES, model_label
 from leukocyte_analysis.data.dataset import LeukocyteDataset
 from leukocyte_analysis.models.resnet import build_resnet18
+from leukocyte_analysis.cross_validate import parse_args as parse_cv_args
 from leukocyte_analysis.train import PROJECT_ROOT, parse_args
 from leukocyte_analysis.training.loaders import make_loaders
 from leukocyte_analysis.training.progress import CompactRichProgressBar
@@ -32,9 +33,20 @@ class TestTrainingConfiguration(unittest.TestCase):
         self.assertEqual(args.init, "imagenet")
         self.assertEqual(args.lr, 1e-4)
         self.assertEqual(args.weight_decay, 0.01)
-        self.assertEqual(args.augmentation, "flips")
+        self.assertEqual(args.augmentation, "flips_photometric")
+        self.assertEqual(args.lr_scheduler, "plateau")
         self.assertEqual(args.early_stopping_patience, 5)
         self.assertFalse(hasattr(args, "task"))
+
+    def test_cross_validation_defaults_and_old_baseline_remain_selectable(self) -> None:
+        with patch.object(sys, "argv", ["leukocyte-cross-validate"]):
+            args = parse_cv_args()
+        self.assertEqual((args.augmentation, args.lr_scheduler),
+                         ("flips_photometric", "plateau"))
+        with patch.object(sys, "argv", ["leukocyte-train", "--augmentation", "flips",
+                                            "--lr-scheduler", "none"]):
+            old = parse_args()
+        self.assertEqual((old.augmentation, old.lr_scheduler), ("flips", "none"))
 
     def test_b_and_t_map_to_lymphocyte(self) -> None:
         self.assertEqual(CLASS_NAMES,

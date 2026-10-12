@@ -4,7 +4,7 @@ from pathlib import Path
 
 import lightning as L
 import torch
-from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
+from lightning.pytorch.callbacks import EarlyStopping, LearningRateMonitor, ModelCheckpoint
 from lightning.pytorch.loggers import CSVLogger, TensorBoardLogger
 from torch import nn
 from torch.utils.data import DataLoader
@@ -26,12 +26,14 @@ def run_training(
     weight_decay: float,
     smoke_test: bool = False,
     early_stopping_patience: int = 0,
+    lr_scheduler: str = "none",
 ) -> None:
     """按验证 macro-F1 选最佳权重；可提前停止，冒烟模式不保存文件。"""
     if early_stopping_patience < 0:
         raise ValueError("early_stopping_patience 不得小于 0")
     prepare_console_output()
-    module = LeukocyteClassifier(backbone, class_weights, learning_rate, weight_decay)
+    module = LeukocyteClassifier(backbone, class_weights, learning_rate, weight_decay,
+                                 lr_scheduler=lr_scheduler)
     checkpoint = None
     # 使用 Lightning 的 Rich 进度条按终端宽度排版；限制刷新频率以减少重绘。
     callbacks = [CompactRichProgressBar(refresh_rate=5)]
@@ -55,6 +57,7 @@ def run_training(
             enable_version_counter=False,
         )
         callbacks.append(checkpoint)
+        callbacks.append(LearningRateMonitor(logging_interval="epoch"))
         if getattr(val_loader.dataset, "include_index", False):
             # Lightning 回调记录每轮错分，稳定索引由验证数据集提供。
             callbacks.append(ValidationErrorLogger(

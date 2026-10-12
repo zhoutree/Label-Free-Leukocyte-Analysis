@@ -45,6 +45,7 @@ def run_cross_validation(
     n_splits: int, seed: int, epochs: int, batch_size: int,
     learning_rate: float, weight_decay: float, initialization: str,
     augmentation: str, early_stopping_patience: int, smoke_test: bool = False,
+    lr_scheduler: str = "none",
 ) -> dict:
     """逐折重算统计量、重新初始化训练，并汇总折外预测。"""
     fields, records = read_manifest(split_csv)
@@ -63,13 +64,14 @@ def run_cross_validation(
         "source_manifest": str(split_csv.resolve()),
         "packed_tiles": str(tiles_npy.resolve()),
         "excluded_donors": sorted(TEST_DONORS),
-        "excluded_rule": "CRF049 和 CRF066 的全部图块（包括 CRF049/monocyte）不参与交叉验证",
+        "excluded_rule": "原测试受试者 CRF049 和 CRF066 不参与本次交叉验证；不是质量筛除",
         "selection_metric": "val_macro_f1",
         "seed": seed,
         "training": {
             "epochs": epochs, "batch_size": batch_size,
             "learning_rate": learning_rate, "weight_decay": weight_decay,
             "initialization": initialization, "augmentation": augmentation,
+            "lr_scheduler": lr_scheduler,
             "early_stopping_patience": early_stopping_patience,
         },
         "folds": [
@@ -104,7 +106,7 @@ def run_cross_validation(
         run_training(
             backbone, train_loader, val_loader, weights, device, epochs,
             training_dir, learning_rate, weight_decay, smoke_test,
-            early_stopping_patience,
+            early_stopping_patience, lr_scheduler=lr_scheduler,
         )
         if smoke_test:
             break

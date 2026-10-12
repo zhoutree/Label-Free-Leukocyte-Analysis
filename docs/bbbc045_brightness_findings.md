@@ -54,7 +54,7 @@ batch1 的预测对较小强度变化也很敏感；batch2 可能还受对比度
 
 ## 相同受试者分折的训练增强对照
 
-仅翻转基线 `runs/cv_resnet18_imagenet_flips_20261011_213201/` 与增强实验 `runs/cv_resnet18_imagenet_flips_photometric_20261012_111752/` 使用相同的 11 名受试者、3 折、seed 42、ImageNet 初始化 ResNet-18、最多 20 轮、batch size 128、学习率 0.0001、weight decay 0.01，均按验证 macro-F1 选择每折最佳权重并早停。CRF049、CRF066 始终排除。唯一有意改变的是训练增强：在随机翻转之外，使用 torchvision `ColorJitter` 将训练图块的原始灰度随机乘 0.8～1.25 的亮度系数、以单图均值为中心施加 0.9～1.1 的对比度系数，再用该折训练集统计量归一化；验证图块不做随机扰动。
+仅翻转基线 `runs/cv_resnet18_imagenet_flips_20261011_213201/` 与增强实验 `runs/cv_resnet18_imagenet_flips_photometric_20261012_111752/` 使用相同的 11 名受试者、3 折、seed 42、ImageNet 初始化 ResNet-18、最多 20 轮、batch size 128、固定学习率 0.0001（当时尚未启用学习率调度）、weight decay 0.01，均按验证 macro-F1 选择每折最佳权重并早停。CRF049、CRF066 作为原测试受试者始终不参与这两次交叉验证，并非因认定它们错标而额外质量筛除。唯一有意改变的是训练增强：在随机翻转之外，使用 torchvision `ColorJitter` 将训练图块的原始灰度随机乘 0.8～1.25 的亮度系数、以单图均值为中心施加 0.9～1.1 的对比度系数，再用该折训练集统计量归一化；验证图块不做随机扰动。
 
 | 折外指标（84,815 张） | 仅翻转 | 加亮度／对比度 |
 | --- | ---: | ---: |

@@ -7,7 +7,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import torch
-from lightning.pytorch.callbacks import EarlyStopping
+from lightning.pytorch.callbacks import EarlyStopping, LearningRateMonitor
 from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
 from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
@@ -48,11 +48,21 @@ class TestReporting(unittest.TestCase):
             with patch("leukocyte_analysis.training.experiment.L.Trainer") as trainer:
                 run_training(nn.Linear(1, 4), loader, loader, torch.ones(4),
                              torch.device("cpu"), 20, Path(temporary) / "run",
-                             1e-4, 0.01, early_stopping_patience=5)
+                             1e-4, 0.01, early_stopping_patience=5,
+                             lr_scheduler="plateau")
         callbacks = trainer.call_args.kwargs["callbacks"]
         early_stop = next(item for item in callbacks if isinstance(item, EarlyStopping))
         self.assertEqual(early_stop.monitor, "val_macro_f1")
         self.assertEqual(early_stop.patience, 5)
+        self.assertTrue(any(isinstance(item, LearningRateMonitor) for item in callbacks))
+        module = trainer.return_value.fit.call_args.args[0]
+        configured = module.configure_optimizers()
+        self.assertEqual(configured["lr_scheduler"]["monitor"], "val_macro_f1")
+        scheduler = configured["lr_scheduler"]["scheduler"]
+        self.assertIsInstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau)
+        for _ in range(3):
+            scheduler.step(0.5)
+        self.assertAlmostEqual(configured["optimizer"].param_groups[0]["lr"], 5e-5)
 
     def test_indexed_validation_loader_gets_error_callback(self) -> None:
         images = torch.zeros(4, 1)
@@ -109,12 +119,13 @@ class TestReporting(unittest.TestCase):
         with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent) as temporary:
             output = Path(temporary) / "run"
             run_training(model, loader, loader, weights, torch.device("cpu"),
-                         1, output, 0.01, 0.0)
+                         1, output, 0.01, 0.0, lr_scheduler="plateau")
 
             with (output / "csv" / "metrics.csv").open(newline="", encoding="utf-8") as history:
                 rows = list(csv.DictReader(history))
             self.assertTrue(any(row.get("train_weighted_loss") for row in rows))
             self.assertTrue(any(row.get("val_macro_f1") for row in rows))
+            self.assertTrue(any(row.get("lr-AdamW") for row in rows))
             self.assertTrue((output / "checkpoints" / "best.ckpt").exists())
             self.assertTrue((output / "checkpoints" / "last.ckpt").exists())
 

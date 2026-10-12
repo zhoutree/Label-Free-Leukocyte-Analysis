@@ -23,11 +23,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--epochs", type=int, default=20)
     parser.add_argument("--batch-size", type=int, default=128)
     parser.add_argument("--lr", type=float, default=1e-4, help="AdamW 学习率；ImageNet 微调基线默认 0.0001")
+    parser.add_argument("--lr-scheduler", choices=("none", "plateau"), default="plateau",
+                        help="验证 macro-F1 停滞时降低学习率；none 可复现旧固定学习率基线")
     parser.add_argument("--weight-decay", type=float, default=0.01, help="AdamW 权重衰减；不是 L1 正则化")
     parser.add_argument("--init", choices=("imagenet", "random"), default="imagenet", help="模型权重初始化方式")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--augmentation", choices=("none", "flips", "flips_photometric"),
-                        default="flips", help="训练集增强；flips_photometric 额外扰动原始灰度的亮度与对比度")
+                        default="flips_photometric", help="训练集增强；默认同时扰动原始灰度的亮度与对比度")
     parser.add_argument("--early-stopping-patience", type=int, default=5,
                         help="验证 macro-F1 连续多少轮未提高就停止；0 表示禁用")
     parser.add_argument("--smoke-test", action="store_true", help="只跑两批，不保存权重")
@@ -56,13 +58,17 @@ def main() -> None:
         args.batch_size, args.seed, device, args.augmentation,
     )
     print("四分类：", CLASS_NAMES, "初始化：", args.init, "AdamW weight_decay：", args.weight_decay,
-          "训练增强：", args.augmentation, "早停耐心值：", args.early_stopping_patience)
+          "训练增强：", args.augmentation, "学习率调度：", args.lr_scheduler,
+          "早停耐心值：", args.early_stopping_patience)
     model = build_resnet18(len(CLASS_NAMES), initialization=args.init)
-    output_dir = args.output_dir or PROJECT_ROOT / "runs" / f"resnet18_four_{args.init}_{args.augmentation}_{datetime.now():%Y%m%d_%H%M%S}"
+    output_dir = args.output_dir or PROJECT_ROOT / "runs" / (
+        f"resnet18_four_{args.init}_{args.augmentation}_{args.lr_scheduler}_"
+        f"{datetime.now():%Y%m%d_%H%M%S}"
+    )
     run_training(
         model, train_loader, val_loader, weights, device,
         args.epochs, output_dir, args.lr, args.weight_decay, args.smoke_test,
-        args.early_stopping_patience,
+        args.early_stopping_patience, lr_scheduler=args.lr_scheduler,
     )
 
 
