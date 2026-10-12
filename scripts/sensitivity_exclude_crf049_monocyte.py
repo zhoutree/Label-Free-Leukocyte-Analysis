@@ -5,9 +5,8 @@ import json
 import tempfile
 from pathlib import Path
 
-from sklearn.metrics import accuracy_score, classification_report
-
 from leukocyte_analysis.data.bbbc045_config import CLASS_NAMES
+from leukocyte_analysis.evaluation.metrics import classification_metrics
 from leukocyte_analysis.evaluation.plots import save_confusion_matrices
 
 
@@ -26,18 +25,13 @@ def metrics(rows):
     """用 scikit-learn 对指定子集重算指标，不重新推理模型。"""
     y_true = [int(row["true_index"]) for row in rows]
     y_pred = [int(row["predicted_index"]) for row in rows]
-    options = {
-        "labels": list(range(len(CLASS_NAMES))),
-        "target_names": list(CLASS_NAMES),
-        "zero_division": 0,
-    }
-    report = classification_report(y_true, y_pred, output_dict=True, **options)
+    result = classification_metrics(y_true, y_pred, CLASS_NAMES)
     return {
-        "samples": len(rows),
+        "samples": result["samples"],
         "errors": sum(true != pred for true, pred in zip(y_true, y_pred)),
-        "accuracy": float(accuracy_score(y_true, y_pred)),
-        "macro_f1": float(report["macro avg"]["f1-score"]),
-        "classification_report": report,
+        "accuracy": result["accuracy"],
+        "macro_f1": result["macro_f1"],
+        "classification_report": result["classification_report"],
     }
 
 

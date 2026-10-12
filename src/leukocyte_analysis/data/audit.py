@@ -65,49 +65,22 @@ def _validate_records(records: list[dict[str, str]]) -> Counter:
     return counts
 
 
-def _inspect_tiles(
-    records: list[dict[str, str]], tiles_npy: Path
-) -> tuple[Counter, dict, dict]:
-    """检查像素，并以训练集分位数标记低清晰度候选。"""
-    tiles = np.load(tiles_npy, mmap_mode="r", allow_pickle=False)
-    expected_shape = (len(records), TILE_SIZE, TILE_SIZE)
-    if tiles.shape != expected_shape or tiles.dtype != np.float32:
-        raise ValueError(
-            f"图块规格异常：实际 {tiles.shape}、{tiles.dtype}；"
-            f"预期 {expected_shape}、float32"
-        )
+def _pixel_issue(tile: np.ndarray) -> str | None:
+    """只识别基础像素异常，不判断细胞标签或清晰度。"""
+    if not np.isfinite(tile).all():
+        return "nonfinite"
+    if not np.any(tile != 0):
+        return "all_zero"
+    if tile.min() == tile.max():
+        return "constant"
+    return None
 
-    quality = Counter()
-    std_by_class = defaultdict(list)
-    train_focus_by_class = defaultdict(list)
-    focus_rows = []
 
-    for index, record in enumerate(records):
-        tile = tiles[index]
-        if not np.isfinite(tile).all():
-            quality["nonfinite"] += 1
-        elif not np.any(tile != 0):
-            quality["all_zero"] += 1
-        elif tile.min() == tile.max():
-            quality["constant"] += 1
-        else:
-            # 仅统计对比度，不据此自动删除低对比度细胞。
-            std_by_class[record["label"]].append(float(tile.std()))
-            # 只筛查 train/val，避免借测试图的质量分布调整训练方案。
-            if record["split"] in {"train", "val"}:
-                score = focus_proxy(tile)
-                focus_rows.append((index, score))
-                if record["split"] == "train":
-                    train_focus_by_class[record["label"]].append(score)
-
-    percentiles = {
-        label: {
-            "p01": float(np.percentile(values, 1)),
-            "p50": float(np.percentile(values, 50)),
-            "p99": float(np.percentile(values, 99)),
-        }
-        for label, values in std_by_class.items()
-    }
+def _screen_focus(
+    records: list[dict[str, str]], train_focus_by_class: dict,
+    focus_rows: list[tuple[int, float]],
+) -> dict:
+    """仅用训练集分位数定阈值，再标记 train/val 待核查图块。"""
     if set(train_focus_by_class) != set(SOURCE_CLASS_NAMES):
         raise ValueError("训练集缺少某个类别，无法按类别校准清晰度代理阈值")
 
@@ -124,7 +97,7 @@ def _inspect_tiles(
             candidate_counts[(record["split"], record["label"])] += 1
             candidates.append((score, index))
 
-    focus_screening = {
+    return {
         "interpretation": "中央区域平滑后拉普拉斯方差；低值仅提示可能缺少细节，不能确认模糊或错标",
         "threshold_source": "每类训练图块清晰度代理分数的第 1 百分位",
         "thresholds": thresholds,
@@ -144,7 +117,48 @@ def _inspect_tiles(
         ],
         "auto_excluded": 0,
     }
-    return quality, percentiles, focus_screening
+
+
+def _inspect_tiles(
+    records: list[dict[str, str]], tiles_npy: Path
+) -> tuple[Counter, dict, dict]:
+    """逐块统计像素质量，再分别汇总对比度和清晰度筛查。"""
+    tiles = np.load(tiles_npy, mmap_mode="r", allow_pickle=False)
+    expected_shape = (len(records), TILE_SIZE, TILE_SIZE)
+    if tiles.shape != expected_shape or tiles.dtype != np.float32:
+        raise ValueError(
+            f"图块规格异常：实际 {tiles.shape}、{tiles.dtype}；"
+            f"预期 {expected_shape}、float32"
+        )
+
+    quality = Counter()
+    std_by_class = defaultdict(list)
+    train_focus_by_class = defaultdict(list)
+    focus_rows = []
+    for index, record in enumerate(records):
+        tile = tiles[index]
+        issue = _pixel_issue(tile)
+        if issue is not None:
+            quality[issue] += 1
+            continue
+
+        # 对比度和清晰度仅作提示，不据此自动删除图块。
+        std_by_class[record["label"]].append(float(tile.std()))
+        if record["split"] in {"train", "val"}:
+            score = focus_proxy(tile)
+            focus_rows.append((index, score))
+            if record["split"] == "train":
+                train_focus_by_class[record["label"]].append(score)
+
+    percentiles = {
+        label: {
+            "p01": float(np.percentile(values, 1)),
+            "p50": float(np.percentile(values, 50)),
+            "p99": float(np.percentile(values, 99)),
+        }
+        for label, values in std_by_class.items()
+    }
+    return quality, percentiles, _screen_focus(records, train_focus_by_class, focus_rows)
 
 
 def audit_packed_data(split_csv: Path, tiles_npy: Path) -> dict:

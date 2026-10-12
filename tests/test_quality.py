@@ -7,12 +7,18 @@ from pathlib import Path
 import numpy as np
 from scipy.ndimage import gaussian_filter
 
-from leukocyte_analysis.data.audit import _inspect_tiles
+from leukocyte_analysis.data.audit import _inspect_tiles, _pixel_issue
 from leukocyte_analysis.data.bbbc045_config import SOURCE_CLASS_NAMES
 from leukocyte_analysis.data.quality import focus_proxy
 
 
 class TestFocusProxy(unittest.TestCase):
+    def test_pixel_issues_are_counted_separately_from_focus(self) -> None:
+        self.assertEqual(_pixel_issue(np.full((55, 55), np.nan)), "nonfinite")
+        self.assertEqual(_pixel_issue(np.zeros((55, 55))), "all_zero")
+        self.assertEqual(_pixel_issue(np.ones((55, 55))), "constant")
+        self.assertIsNone(_pixel_issue(np.eye(55)))
+
     def test_blurred_edge_has_lower_score(self) -> None:
         sharp = np.zeros((55, 55), dtype=np.float32)
         sharp[14:41, 14:41] = 1

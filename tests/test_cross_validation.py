@@ -11,7 +11,7 @@ import torch
 from torch import nn
 
 from leukocyte_analysis.data.stats import write_train_stats
-from leukocyte_analysis.training.cross_validation import (
+from leukocyte_analysis.data.cv_split import (
     build_donor_folds,
     write_fold_manifest,
 )

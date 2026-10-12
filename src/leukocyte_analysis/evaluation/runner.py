@@ -7,7 +7,7 @@ from pathlib import Path
 
 import lightning as L
 import torch
-from sklearn.metrics import accuracy_score, classification_report
+from sklearn.metrics import classification_report
 from torch import nn
 from torch.utils.data import DataLoader
 
@@ -17,6 +17,7 @@ from ..models.resnet import build_resnet18
 from ..training.module import LeukocyteClassifier
 from ..training.progress import CompactRichProgressBar, prepare_console_output
 from .error_records import ERROR_FIELDS, misclassified_rows, write_csv
+from .metrics import classification_metrics
 from .plots import save_confusion_matrices, save_error_examples
 
 
@@ -97,14 +98,8 @@ def _write_report(dataset: LeukocyteDataset, predictions: list[dict], output_dir
     y_pred = [row["predicted_index"] for row in predictions]
     options = dict(labels=list(range(len(class_names))), target_names=list(class_names),
                    zero_division=0)
-    report = classification_report(y_true, y_pred, output_dict=True, **options)
-    summary = {
-        "samples": len(predictions),
-        "class_names": list(class_names),
-        "accuracy": float(accuracy_score(y_true, y_pred)),
-        "macro_f1": float(report["macro avg"]["f1-score"]),
-        "classification_report": report,
-    }
+    summary = classification_metrics(y_true, y_pred, class_names)
+    report = summary["classification_report"]
     with (output_dir / "test_metrics.json").open("w", encoding="utf-8") as file:
         json.dump(summary, file, ensure_ascii=False, indent=2)
     (output_dir / "test_classification_report.txt").write_text(
