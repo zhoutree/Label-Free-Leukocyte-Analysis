@@ -10,6 +10,7 @@ import numpy as np
 from sklearn.model_selection import StratifiedGroupKFold
 
 from .bbbc045_config import TEST_DONORS, model_label
+from .split import read_manifest as read_manifest
 
 
 @dataclass(frozen=True)
@@ -17,20 +18,6 @@ class DonorFold:
     number: int
     train_donors: frozenset[str]
     val_donors: frozenset[str]
-
-
-def read_manifest(path: Path) -> tuple[list[str], list[dict[str, str]]]:
-    """读取原划分清单；后续仅修改复制品中的 split 列。"""
-    with path.open("r", newline="", encoding="utf-8") as handle:
-        reader = csv.DictReader(handle)
-        required = {"file", "donor", "label", "row", "col", "split"}
-        if reader.fieldnames is None or not required.issubset(reader.fieldnames):
-            raise ValueError("划分清单缺少交叉验证所需的列")
-        fields = list(reader.fieldnames)
-        records = list(reader)
-    if not records:
-        raise ValueError("划分清单为空")
-    return fields, records
 
 
 def build_donor_folds(

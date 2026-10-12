@@ -1,6 +1,5 @@
 """用已完成交叉验证的检查点比较固定亮度扰动下的折外表现。"""
 
-import csv
 import json
 import tempfile
 from collections import defaultdict
@@ -16,6 +15,7 @@ from torchvision.transforms.v2.functional import adjust_brightness
 from ..data.bbbc045_config import CLASS_NAMES, TEST_DONORS
 from ..data.dataset import LeukocyteDataset
 from ..models.resnet import build_resnet18
+from .error_records import write_csv
 from .metrics import classification_metrics
 from .runner import check_checkpoint_head, load_classifier, predict
 
@@ -83,13 +83,6 @@ def _measure(predictions: list[dict], run: str, factor: float) -> tuple[dict, li
         donors.append({**common, "donor": donor, "samples": result["samples"],
                        "accuracy": result["accuracy"], "macro_f1": result["macro_f1"]})
     return summary, classes, donors
-
-
-def _write_csv(path: Path, rows: list[dict]) -> None:
-    with path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
-        writer.writeheader()
-        writer.writerows(rows)
 
 
 def _save_plots(overall: list[dict], classes: list[dict], output_dir: Path) -> None:
@@ -185,9 +178,9 @@ def compare_brightness(
     with tempfile.TemporaryDirectory(prefix=".brightness-", dir=output_dir.parent) as temporary:
         staged = Path(temporary) / "report"
         staged.mkdir()
-        _write_csv(staged / "overall.csv", overall_rows)
-        _write_csv(staged / "per_class_recall.csv", class_rows)
-        _write_csv(staged / "by_donor.csv", donor_rows)
+        write_csv(staged / "overall.csv", overall_rows, tuple(overall_rows[0]))
+        write_csv(staged / "per_class_recall.csv", class_rows, tuple(class_rows[0]))
+        write_csv(staged / "by_donor.csv", donor_rows, tuple(donor_rows[0]))
         (staged / "settings.json").write_text(json.dumps({
             "baseline_run": str(baseline_run.resolve()),
             "augmented_run": str(augmented_run.resolve()),

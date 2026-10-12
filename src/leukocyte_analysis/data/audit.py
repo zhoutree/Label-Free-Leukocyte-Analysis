@@ -1,6 +1,5 @@
 """审计打包数据的结构和基础图像质量，不修改或删除样本。"""
 
-import csv
 import json
 from collections import Counter, defaultdict
 from pathlib import Path
@@ -15,20 +14,7 @@ from .bbbc045_config import (
     VAL_DONORS,
 )
 from .quality import focus_proxy
-
-
-def _read_records(split_csv: Path) -> list[dict[str, str]]:
-    """读取清单并检查必需列。"""
-    with split_csv.open("r", newline="", encoding="utf-8") as csv_file:
-        reader = csv.DictReader(csv_file)
-        required = {"file", "donor", "label", "row", "col", "split"}
-        if reader.fieldnames is None or not required.issubset(reader.fieldnames):
-            raise ValueError("划分清单缺少必需列")
-        records = list(reader)
-
-    if not records:
-        raise ValueError("划分清单为空")
-    return records
+from .split import read_manifest
 
 
 def _validate_records(records: list[dict[str, str]]) -> Counter:
@@ -163,7 +149,7 @@ def _inspect_tiles(
 
 def audit_packed_data(split_csv: Path, tiles_npy: Path) -> dict:
     """组合清单校验和图块检查，返回不修改数据的审计报告。"""
-    records = _read_records(split_csv)
+    _, records = read_manifest(split_csv)
     counts = _validate_records(records)
     quality, percentiles, focus_screening = _inspect_tiles(records, tiles_npy)
 

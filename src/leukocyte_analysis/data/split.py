@@ -8,6 +8,20 @@ from pathlib import Path
 from .bbbc045_config import TEST_DONORS, TRAIN_DONORS, VAL_DONORS
 
 
+def read_manifest(path: Path) -> tuple[list[str], list[dict[str, str]]]:
+    """读取带 split 列的图块清单，并检查必需列与记录。"""
+    with path.open("r", newline="", encoding="utf-8") as handle:
+        reader = csv.DictReader(handle)
+        required = {"file", "donor", "label", "row", "col", "split"}
+        if reader.fieldnames is None or not required.issubset(reader.fieldnames):
+            raise ValueError("划分清单缺少必需列")
+        fields = list(reader.fieldnames)
+        records = list(reader)
+    if not records:
+        raise ValueError("划分清单为空")
+    return fields, records
+
+
 def split_for_donor(donor: str) -> str:
     """根据受试者 ID 返回 train、val 或 test。"""
     if donor in TRAIN_DONORS:

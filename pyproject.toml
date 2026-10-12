@@ -15,6 +15,7 @@ leukocyte-evaluate = "leukocyte_analysis.evaluate:main"
 leukocyte-record-errors = "leukocyte_analysis.record_errors:main"
 leukocyte-cross-validate = "leukocyte_analysis.cross_validate:main"
 leukocyte-brightness-stress = "leukocyte_analysis.brightness_stress:main"
+leukocyte-audit-brightness = "leukocyte_analysis.audit_brightness:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

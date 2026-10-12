@@ -17,6 +17,7 @@ src/leukocyte_analysis/
   evaluate.py                   训练完成后的测试集评估入口
   record_errors.py              从预测文件或检查点导出可定位的错分记录
   brightness_stress.py           已训练交叉验证权重的亮度敏感性诊断入口
+  audit_brightness.py            原始图块的受试者／类别／批次亮度分布入口
 data/processed/                 已处理图块、清单、划分和训练集统计
 data/pretrained/                官方预训练权重缓存（初次下载后复用）
 reports/                        审计结果及预览图
@@ -59,7 +60,7 @@ python -m leukocyte_analysis.train --init imagenet --lr 0.0001 --epochs 20 --bat
 
 可选 `--augmentation flips_photometric`：除上述翻转外，使用 torchvision `ColorJitter` 对**训练图块的原始灰度值**随机施加 0.8–1.25 倍亮度、0.9–1.1 倍对比度，再沿用该折训练集的均值和标准差归一化。验证与测试图块仍只做原有归一化。这个范围是在查看既有验证集的亮度异常后选定的，因此下面的同折比较属于探索性分析，不应视为全新独立测试。
 
-当前只提供四分类训练与评估入口；旧五分类权重即使存在，也不能直接用于四分类。早停主要减少最佳验证轮次之后的无效训练，并不保证提高最佳分数。已完成的同折三折对照显示，加入亮度／对比度增强后，折外 macro-F1 从 0.9464 升至 0.9679，但个别受试者和采集批次退步；详情见[实验与异常记录](docs/bbbc045_test_audit.md)。这一对照不等于新的独立测试结果。
+当前只提供四分类训练与评估入口；旧五分类权重即使存在，也不能直接用于四分类。早停主要减少最佳验证轮次之后的无效训练，并不保证提高最佳分数。亮度审计、增强对照与压力测试的结果和解释统一见[亮度实验汇总](docs/bbbc045_brightness_findings.md)；测试错分及标签来源核查见[测试与标签异常记录](docs/bbbc045_test_audit.md)。
 
 终端使用 Lightning 的 `RichProgressBar` 显示批次进度，并按实时窗口宽度逐级收起指标：窄窗口只保留轮次、横条和批次；中等宽度加入剩余时间及简短的 `loss`、`val_f1`；宽窗口再显示 `val_loss`。完整指标始终写入日志。极窄窗口或训练时频繁缩放仍可能造成显示残影。首次使用前，在已激活的环境中执行 `python -m pip install rich`；以后从更新后的 `environment.yml` 重建环境时会自动安装。训练时或训练后可另开终端运行：
 
@@ -110,6 +111,20 @@ python -m leukocyte_analysis.brightness_stress `
 
 默认将每折验证图块的原始灰度值分别乘以 0.8、1.0、1.2，随后使用**该折训练集**统计量归一化；1.0 保持原始推理路径。工具会核对两次运行的受试者分折和其他训练参数一致，并拒绝把 CRF049/CRF066 纳入诊断。输出 `overall.csv`、`per_class_recall.csv`、`by_donor.csv`、两张曲线图和设置记录。报告目录必须不存在，避免覆盖既有结果。此测试只衡量既有验证集上的亮度敏感性：亮度区间和增强方案都曾参考验证异常，结果仍是**探索性证据**，不是全新独立测试；若 1.0 的指标与各次运行的 `summary.json` 明显不同，应先核对数据与检查点版本。
 
+为判断 ±20% 扰动是否贴近实际采集差异，可先做**只读的真实亮度分布审计**。默认只统计交叉验证的 11 名受试者，不读取 CRF049/CRF066：
+
+```powershell
+python -m leukocyte_analysis.audit_brightness
+```
+
+若要把**原 train、val、test 三组全部纳入同一份描述性报告**，显式使用：
+
+```powershell
+python -m leukocyte_analysis.audit_brightness --include-test
+```
+
+默认分别新建 `reports/bbbc045_brightness_distribution/` 或 `reports/bbbc045_brightness_distribution_all_splits/`，互不覆盖。`tile_metrics.csv` 保存逐图块整图均值、外侧 5 像素环中位数和 P90−P10；`group_summary.csv` 按原划分／受试者／原始类别／batch 汇总，`split_summary.csv` 按原划分汇总，`within_donor_batch_pairs.csv` 给出同一受试者同一类别的批次比值，`largest_batch_shifts.png` 显示样本充足组中差异最大的批次。**边缘环中位数只是背景亮度代理**：细胞触边时也会受细胞影响；强度差异也可能来自细胞占图比例，不能单凭这些统计判定光照或标签错误。含测试集的输出仅用于事后排查，不改变原有 train/val/test 划分、图块或模型权重；已经查看过 CRF049/CRF066，不能用其统计结果挑选预处理后仍把它们称为全新独立测试集。
+
 ## 最终测试评估
 
 先仅用训练/验证集确定实验配置和最佳模型，再用新四分类训练的 `best.ckpt` 对保留测试受试者评估一次。评估入口会拒绝旧五分类检查点：
@@ -136,7 +151,7 @@ python -m leukocyte_analysis.record_errors --split test --predictions-csv "$run\
 
 记录程序拒绝覆盖已有目标文件；人工核查时不要根据测试集错分调整模型后再把同一测试集称为独立最终测试。
 
-可选：若希望不再设置 `PYTHONPATH`，在已激活环境中执行 `python -m pip install --no-deps --no-build-isolation -e .`，此后可使用 `leukocyte-train`、`leukocyte-cross-validate`、`leukocyte-evaluate`、`leukocyte-record-errors` 和 `leukocyte-brightness-stress` 命令。
+可选：若希望不再设置 `PYTHONPATH`，在已激活环境中执行 `python -m pip install --no-deps --no-build-isolation -e .`，此后可使用 `leukocyte-train`、`leukocyte-cross-validate`、`leukocyte-evaluate`、`leukocyte-record-errors`、`leukocyte-brightness-stress` 和 `leukocyte-audit-brightness` 命令。
 
 运行不依赖完整数据集的单元测试：
 

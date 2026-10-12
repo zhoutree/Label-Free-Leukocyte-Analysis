@@ -10,7 +10,8 @@ import torch
 from ..data.bbbc045_config import (
     CLASS_NAMES, TEST_DONORS, TRAIN_DONORS, VAL_DONORS,
 )
-from ..data.cv_split import build_donor_folds, read_manifest, write_fold_manifest
+from ..data.cv_split import build_donor_folds, write_fold_manifest
+from ..data.split import read_manifest
 from ..data.stats import write_train_stats
 from ..evaluation.metrics import classification_metrics
 from ..evaluation.runner import load_classifier, predict

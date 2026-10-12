@@ -1,6 +1,5 @@
 """加载最佳检查点，对保留测试集推理并输出可复核报告。"""
 
-import csv
 import json
 import tempfile
 from pathlib import Path
@@ -105,15 +104,10 @@ def _write_report(dataset: LeukocyteDataset, predictions: list[dict], output_dir
     (output_dir / "test_classification_report.txt").write_text(
         classification_report(y_true, y_pred, output_dict=False, **options), encoding="utf-8"
     )
-    with (output_dir / "test_per_class_metrics.csv").open("w", newline="", encoding="utf-8") as file:
-        writer = csv.DictWriter(file, fieldnames=("class", "precision", "recall", "f1-score", "support"))
-        writer.writeheader()
-        for name in class_names:
-            writer.writerow({"class": name, **report[name]})
-    with (output_dir / "test_predictions.csv").open("w", newline="", encoding="utf-8") as file:
-        writer = csv.DictWriter(file, fieldnames=list(predictions[0]))
-        writer.writeheader()
-        writer.writerows(predictions)
+    class_fields = ("class", "precision", "recall", "f1-score", "support")
+    class_rows = [{"class": name, **report[name]} for name in class_names]
+    write_csv(output_dir / "test_per_class_metrics.csv", class_rows, class_fields)
+    write_csv(output_dir / "test_predictions.csv", predictions, tuple(predictions[0]))
     # 完整预测用于重算指标；错分表额外保留原始文件和网格坐标。
     errors = misclassified_rows(dataset, predictions, "test")
     write_csv(output_dir / "test_misclassified.csv", errors, ERROR_FIELDS)
