@@ -82,6 +82,46 @@ class TestReporting(unittest.TestCase):
             scheduler.step(0.5)
         self.assertAlmostEqual(configured["optimizer"].param_groups[0]["lr"], 5e-5)
 
+    def test_cosine_scheduler_and_early_stopping_are_independent(self) -> None:
+        images = torch.zeros(4, 1)
+        targets = torch.arange(4)
+        loader = DataLoader(TensorDataset(images, targets), batch_size=4)
+        with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent) as temporary:
+            with patch("leukocyte_analysis.training.experiment.L.Trainer") as trainer:
+                run_training(nn.Linear(1, 4), loader, loader, torch.ones(4),
+                             torch.device("cpu"), 30, Path(temporary) / "run",
+                             1e-4, 0.01, early_stopping_patience=10,
+                             lr_scheduler="cosine")
+        callbacks = trainer.call_args.kwargs["callbacks"]
+        early_stop = next(item for item in callbacks if isinstance(item, EarlyStopping))
+        self.assertEqual((early_stop.monitor, early_stop.patience), ("val_macro_f1", 10))
+        self.assertEqual(early_stop.min_delta, 1e-3)
+        self.assertEqual(trainer.call_args.kwargs["min_epochs"], 15)
+        module = trainer.return_value.fit.call_args.args[0]
+        configured = module.configure_optimizers()
+        self.assertNotIn("monitor", configured["lr_scheduler"])
+        self.assertIsInstance(configured["lr_scheduler"]["scheduler"],
+                              torch.optim.lr_scheduler.SequentialLR)
+        self.assertAlmostEqual(configured["optimizer"].param_groups[0]["lr"], 5e-5)
+
+    def test_cosine_warmup_decay_and_resume_tail(self) -> None:
+        from leukocyte_analysis.training.module import LeukocyteClassifier
+
+        module = LeukocyteClassifier(nn.Linear(1, 4), torch.ones(4), 1e-4, 0.0,
+                                     lr_scheduler="cosine", schedule_epochs=5)
+        configured = module.configure_optimizers()
+        optimizer = configured["optimizer"]
+        scheduler = configured["lr_scheduler"]["scheduler"]
+        rates = [optimizer.param_groups[0]["lr"]]
+        for _ in range(8):
+            optimizer.step()
+            scheduler.step()
+            rates.append(optimizer.param_groups[0]["lr"])
+        self.assertAlmostEqual(rates[0], 5e-5)
+        self.assertAlmostEqual(rates[2], 1e-4)
+        self.assertTrue(all(left >= right for left, right in zip(rates[2:5], rates[3:6])))
+        self.assertTrue(all(abs(rate - 1e-6) < 1e-10 for rate in rates[5:]))
+
     def test_resume_passes_checkpoint_to_lightning(self) -> None:
         images = torch.zeros(4, 1)
         targets = torch.arange(4)
@@ -122,6 +162,26 @@ class TestReporting(unittest.TestCase):
             ) as handle:
                 self.assertIn("1", {row["epoch"] for row in csv.DictReader(handle)
                                     if row["val_macro_f1"]})
+
+    def test_cosine_resume_keeps_floor_after_original_horizon(self) -> None:
+        images = torch.arange(8, dtype=torch.float32).reshape(-1, 1) / 8
+        targets = torch.arange(8) % 4
+        loader = DataLoader(TensorDataset(images, targets), batch_size=4)
+        with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent) as temporary:
+            root = Path(temporary)
+            run_training(nn.Linear(1, 4), loader, loader, torch.ones(4),
+                         torch.device("cpu"), 2, root / "first", 1e-4, 0.0,
+                         lr_scheduler="cosine")
+            last = root / "first" / "checkpoints" / "last.ckpt"
+            run_training(nn.Linear(1, 4), loader, loader, torch.ones(4),
+                         torch.device("cpu"), 3, root / "continued", 1e-4, 0.0,
+                         lr_scheduler="cosine", schedule_epochs=2,
+                         resume_checkpoint=last)
+            continued = torch.load(root / "continued" / "checkpoints" / "last.ckpt",
+                                   map_location="cpu", weights_only=False)
+            self.assertAlmostEqual(
+                continued["optimizer_states"][0]["param_groups"][0]["lr"], 1e-6,
+            )
 
     def test_indexed_validation_loader_gets_error_callback(self) -> None:
         images = torch.zeros(4, 1)
@@ -178,7 +238,7 @@ class TestReporting(unittest.TestCase):
         with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent) as temporary:
             output = Path(temporary) / "run"
             run_training(model, loader, loader, weights, torch.device("cpu"),
-                         1, output, 0.01, 0.0, lr_scheduler="plateau")
+                         1, output, 0.01, 0.0, lr_scheduler="cosine")
 
             with (output / "csv" / "metrics.csv").open(newline="", encoding="utf-8") as history:
                 rows = list(csv.DictReader(history))

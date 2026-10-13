@@ -14,6 +14,9 @@ PLATEAU_FACTOR = 0.5
 PLATEAU_PATIENCE = 3
 PLATEAU_COOLDOWN = 2
 PLATEAU_MIN_LR_RATIO = 0.01
+COSINE_WARMUP_EPOCHS = 2
+COSINE_WARMUP_START_FACTOR = 0.5
+COSINE_MIN_LR_RATIO = 0.01
 
 
 class LeukocyteClassifier(L.LightningModule):
@@ -26,12 +29,15 @@ class LeukocyteClassifier(L.LightningModule):
         learning_rate: float,
         weight_decay: float,
         lr_scheduler: str = "none",
+        schedule_epochs: int = 30,
     ) -> None:
         super().__init__()
         if len(CLASS_NAMES) != len(class_weights):
             raise ValueError("类别名称数量与类别权重数量不一致")
-        if lr_scheduler not in {"none", "plateau"}:
+        if lr_scheduler not in {"none", "plateau", "cosine"}:
             raise ValueError(f"未知学习率调度方式：{lr_scheduler}")
+        if schedule_epochs < 1:
+            raise ValueError("学习率计划轮数必须大于 0")
         self.save_hyperparameters(ignore=("backbone", "class_weights"))
         self.backbone = backbone
         self.class_names = CLASS_NAMES
@@ -39,6 +45,7 @@ class LeukocyteClassifier(L.LightningModule):
         self.learning_rate = learning_rate
         self.weight_decay = weight_decay
         self.lr_scheduler = lr_scheduler
+        self.schedule_epochs = schedule_epochs
 
         self.train_loss = MeanMetric()
         self.train_weighted_loss = MeanMetric()
@@ -108,11 +115,36 @@ class LeukocyteClassifier(L.LightningModule):
         self.val_recall.reset()
 
     def configure_optimizers(self) -> torch.optim.Optimizer | dict:
-        """由 Lightning 根据验证 macro-F1 自动调整学习率。"""
+        """交由 Lightning 按轮次推进学习率；旧实验仍可选 plateau。"""
         optimizer = torch.optim.AdamW(self.backbone.parameters(), lr=self.learning_rate,
                                       weight_decay=self.weight_decay)
         if self.lr_scheduler == "none":
             return optimizer
+        if self.lr_scheduler == "cosine":
+            warmup_epochs = min(COSINE_WARMUP_EPOCHS, max(0, self.schedule_epochs - 2))
+            schedulers = []
+            milestones = []
+            if warmup_epochs:
+                schedulers.append(torch.optim.lr_scheduler.LinearLR(
+                    optimizer, start_factor=COSINE_WARMUP_START_FACTOR,
+                    total_iters=warmup_epochs,
+                ))
+                milestones.append(warmup_epochs)
+            schedulers.append(torch.optim.lr_scheduler.CosineAnnealingLR(
+                optimizer, T_max=self.schedule_epochs - warmup_epochs,
+                eta_min=self.learning_rate * COSINE_MIN_LR_RATIO,
+            ))
+            # 续训超过原计划轮数时维持最低学习率，不让余弦曲线反弹。
+            schedulers.append(torch.optim.lr_scheduler.ConstantLR(
+                optimizer, factor=COSINE_MIN_LR_RATIO, total_iters=2**31 - 1,
+            ))
+            milestones.append(self.schedule_epochs)
+            scheduler = torch.optim.lr_scheduler.SequentialLR(
+                optimizer, schedulers=schedulers, milestones=milestones,
+            )
+            return {"optimizer": optimizer, "lr_scheduler": {
+                "scheduler": scheduler, "interval": "epoch",
+            }}
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             optimizer, mode="max", factor=PLATEAU_FACTOR,
             patience=PLATEAU_PATIENCE, cooldown=PLATEAU_COOLDOWN,

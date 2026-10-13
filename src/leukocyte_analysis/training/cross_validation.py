@@ -16,9 +16,10 @@ from ..data.stats import write_train_stats
 from ..evaluation.metrics import classification_metrics
 from ..evaluation.runner import load_classifier, predict
 from ..models.resnet import build_resnet18
-from .experiment import run_training
+from .experiment import COSINE_MIN_EPOCHS, EARLY_STOP_MIN_DELTA, run_training
 from .loaders import make_loaders
 from .module import (
+    COSINE_MIN_LR_RATIO, COSINE_WARMUP_EPOCHS, COSINE_WARMUP_START_FACTOR,
     PLATEAU_COOLDOWN, PLATEAU_FACTOR, PLATEAU_MIN_LR_RATIO, PLATEAU_PATIENCE,
 )
 
@@ -102,7 +103,14 @@ def run_cross_validation(
                 "factor": PLATEAU_FACTOR, "patience": PLATEAU_PATIENCE,
                 "cooldown": PLATEAU_COOLDOWN, "min_lr_ratio": PLATEAU_MIN_LR_RATIO,
             } if lr_scheduler == "plateau" else None,
+            "cosine_settings": {
+                "warmup_epochs": min(COSINE_WARMUP_EPOCHS, max(0, epochs - 2)),
+                "warmup_start_factor": COSINE_WARMUP_START_FACTOR,
+                "min_lr_ratio": COSINE_MIN_LR_RATIO,
+                "min_epochs_before_early_stop": min(COSINE_MIN_EPOCHS, epochs),
+            } if lr_scheduler == "cosine" else None,
             "early_stopping_patience": early_stopping_patience,
+            "early_stopping_min_delta": EARLY_STOP_MIN_DELTA,
         },
         "folds": [
             {"number": fold.number, "train_donors": sorted(fold.train_donors),

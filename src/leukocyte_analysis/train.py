@@ -24,14 +24,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--epochs", type=int, default=30)
     parser.add_argument("--batch-size", type=int, default=128)
     parser.add_argument("--lr", type=float, default=1e-4, help="AdamW 学习率；ImageNet 微调基线默认 0.0001")
-    parser.add_argument("--lr-scheduler", choices=("none", "plateau"), default="plateau",
-                        help="验证 macro-F1 停滞时降低学习率；none 可复现旧固定学习率基线")
+    parser.add_argument("--lr-scheduler", choices=("none", "plateau", "cosine"), default="cosine",
+                        help="默认按轮次预热＋余弦退火；plateau 保留供旧实验复现")
     parser.add_argument("--weight-decay", type=float, default=0.01, help="AdamW 权重衰减；不是 L1 正则化")
     parser.add_argument("--init", choices=("imagenet", "random"), default="imagenet", help="模型权重初始化方式")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--augmentation", choices=("none", "flips", "flips_photometric"),
                         default="flips_photometric", help="训练集增强；默认同时扰动原始灰度的亮度与对比度")
-    parser.add_argument("--early-stopping-patience", type=int, default=15,
+    parser.add_argument("--early-stopping-patience", type=int, default=10,
                         help="验证 macro-F1 连续多少轮未提高就停止；0 表示禁用")
     parser.add_argument("--smoke-test", action="store_true", help="只跑两批，不保存权重")
     parser.add_argument("--split-csv", type=Path, default=PROJECT_ROOT / "data/processed/bbbc045_split.csv")

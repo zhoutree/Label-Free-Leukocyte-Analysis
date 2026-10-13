@@ -15,6 +15,10 @@ from .module import LeukocyteClassifier
 from .progress import CompactRichProgressBar, prepare_console_output
 
 
+COSINE_MIN_EPOCHS = 15
+EARLY_STOP_MIN_DELTA = 1e-3
+
+
 def run_training(
     backbone: nn.Module,
     train_loader: DataLoader,
@@ -30,10 +34,14 @@ def run_training(
     lr_scheduler: str = "none",
     resume_checkpoint: Path | None = None,
     data_split_record: dict | None = None,
+    schedule_epochs: int | None = None,
+    early_stopping_min_delta: float = EARLY_STOP_MIN_DELTA,
 ) -> None:
     """按验证 macro-F1 选最佳权重；可提前停止，冒烟模式不保存文件。"""
     if early_stopping_patience < 0:
         raise ValueError("early_stopping_patience 不得小于 0")
+    if early_stopping_min_delta < 0:
+        raise ValueError("early_stopping_min_delta 不得小于 0")
     if resume_checkpoint is not None and (smoke_test or not resume_checkpoint.is_file()):
         raise ValueError("续训需要现存检查点，且不能使用冒烟模式")
     if resume_checkpoint is not None and any(
@@ -42,7 +50,8 @@ def run_training(
         raise FileExistsError("续训输出目录已有训练日志或检查点")
     prepare_console_output()
     module = LeukocyteClassifier(backbone, class_weights, learning_rate, weight_decay,
-                                 lr_scheduler=lr_scheduler)
+                                 lr_scheduler=lr_scheduler,
+                                 schedule_epochs=schedule_epochs or epochs)
     checkpoint = None
     # 使用 Lightning 的 Rich 进度条按终端宽度排版；限制刷新频率以减少重绘。
     callbacks = [CompactRichProgressBar(refresh_rate=5)]
@@ -80,13 +89,17 @@ def run_training(
             # 与最佳权重使用同一验证指标；连续若干次无提升后停止。
             callbacks.append(EarlyStopping(
                 monitor="val_macro_f1", mode="max",
-                patience=early_stopping_patience, min_delta=0.0,
+                patience=early_stopping_patience,
+                min_delta=early_stopping_min_delta,
             ))
 
     trainer = L.Trainer(
         accelerator="gpu" if device.type == "cuda" else "cpu",
         devices=1,
         max_epochs=epochs,
+        min_epochs=(min(COSINE_MIN_EPOCHS, epochs)
+                    if lr_scheduler == "cosine" and early_stopping_patience and not smoke_test
+                    else 0),
         default_root_dir=output_dir,
         logger=loggers,
         callbacks=callbacks,

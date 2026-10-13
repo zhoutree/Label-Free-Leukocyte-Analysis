@@ -88,6 +88,8 @@ class TestResumeFold(unittest.TestCase):
             def fake_train(*args, **kwargs):
                 self.assertEqual(kwargs["resume_checkpoint"].name, "last.ckpt")
                 self.assertEqual(args[5], 30)
+                self.assertEqual(kwargs["schedule_epochs"], 20)
+                self.assertEqual(kwargs["early_stopping_min_delta"], 0.0)
                 checkpoint_dir = args[6] / "checkpoints"
                 checkpoint_dir.mkdir(parents=True)
                 (checkpoint_dir / "best.ckpt").touch()

@@ -35,17 +35,17 @@ class TestTrainingConfiguration(unittest.TestCase):
         self.assertEqual(args.lr, 1e-4)
         self.assertEqual(args.weight_decay, 0.01)
         self.assertEqual(args.augmentation, "flips_photometric")
-        self.assertEqual(args.lr_scheduler, "plateau")
+        self.assertEqual(args.lr_scheduler, "cosine")
         self.assertEqual(args.epochs, 30)
-        self.assertEqual(args.early_stopping_patience, 15)
+        self.assertEqual(args.early_stopping_patience, 10)
         self.assertFalse(hasattr(args, "task"))
 
     def test_cross_validation_defaults_and_old_baseline_remain_selectable(self) -> None:
         with patch.object(sys, "argv", ["leukocyte-cross-validate"]):
             args = parse_cv_args()
         self.assertEqual((args.augmentation, args.lr_scheduler),
-                         ("flips_photometric", "plateau"))
-        self.assertEqual((args.epochs, args.early_stopping_patience), (30, 15))
+                         ("flips_photometric", "cosine"))
+        self.assertEqual((args.epochs, args.early_stopping_patience), (30, 10))
         with patch.object(sys, "argv", ["leukocyte-train", "--augmentation", "flips",
                                             "--lr-scheduler", "none"]):
             old = parse_args()

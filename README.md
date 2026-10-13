@@ -58,10 +58,10 @@ python -m leukocyte_analysis.train --init imagenet --lr 0.0001 --epochs 30 --bat
 
 完整训练默认加载 torchvision 的 ImageNet-1K ResNet-18 权重，优先复用项目 `data/pretrained/` 中的缓存；缓存不存在时需要联网下载。若已设置 `TORCH_HOME`，则尊重该位置。单通道 3×3 首层按 Kaiming 方式初始化，四分类头使用 PyTorch 默认初始化，其他层保留预训练参数并全部参与微调。默认学习率为 `0.0001`，最多训练 30 轮，AdamW 的 `weight_decay=0.01`（不是 L1 正则化）。合并 B/T 后，类别权重由四类训练集数量重新计算，不沿用旧五分类权重。
 
-默认 `--augmentation flips_photometric`：只对训练图块做随机水平／垂直翻转，并用 torchvision `ColorJitter` 对原始灰度施加 0.8–1.25 倍亮度、0.9–1.1 倍对比度，再按训练集均值和标准差归一化；验证与测试集不增强。旧仅翻转实验仍可用 `--augmentation flips` 复现。默认 `--early-stopping-patience 15`：验证 macro-F1 连续 15 轮未提高就提前结束，`0` 表示禁用。训练循环、Rich 终端进度条、日志和检查点由 Lightning 管理；macro-F1 与各类召回率由 TorchMetrics 计算。每次训练新建 `runs/resnet18_four_初始化方式_增强方式_调度方式_时间戳/`，其中 `csv/metrics.csv` 是逐轮指标，`tensorboard/` 是曲线日志，`checkpoints/best.ckpt` 是按验证集 macro-F1 选出的权重。`last.ckpt` 是最近一次实际保存的检查点，可能与 `best.ckpt` 相同。测试集不参与训练或选择权重。
+默认 `--augmentation flips_photometric`：只对训练图块做随机水平／垂直翻转，并用 torchvision `ColorJitter` 对原始灰度施加 0.8–1.25 倍亮度、0.9–1.1 倍对比度，再按训练集均值和标准差归一化；验证与测试集不增强。旧仅翻转实验仍可用 `--augmentation flips` 复现。默认 `--early-stopping-patience 10`：验证 macro-F1 连续 10 次检查没有至少提高 0.001 就停止，`0` 表示禁用；余弦方案至少训练 15 轮（若总轮数不足 15 则训练到上限），因此最多 30 轮时有实际提前结束的空间。早停不保证提高最佳分数。训练循环、Rich 终端进度条、日志和检查点由 Lightning 管理；macro-F1 与各类召回率由 TorchMetrics 计算。每次训练新建 `runs/resnet18_four_初始化方式_增强方式_调度方式_时间戳/`，其中 `csv/metrics.csv` 是逐轮指标，`tensorboard/` 是曲线日志，`checkpoints/best.ckpt` 是按验证集 macro-F1 选出的权重。`last.ckpt` 是最近一次实际保存的检查点，可能与 `best.ckpt` 相同。测试集不参与训练或选择权重。
 常规训练还会在该运行目录写入 `data_split.json`，记录所用清单、CRF101 合并分组规则、每组目录标识及 train/val/test 归属和图块数量；这只记录划分，不复制原始图像。
 
-默认 `--lr-scheduler plateau`：验证 macro-F1 连续四次检查未刷新调度器最佳值时学习率减半，随后冷却两轮，最低为初始值的 1%；Lightning 每轮记录学习率。早停仍独立计数，不因降学习率而重置。可用 `--lr-scheduler none` 运行固定学习率对照。标签平滑保持关闭（交叉熵默认 `label_smoothing=0`）。先前 0.9893 的折外准确率来自**光度增强＋固定学习率**，并非新调度方案的成绩；旧实验采用不同分折和训练耐心值，不能与今后的运行当作单变量对照。光度增强范围曾参考旧验证异常，因此同折比较属于探索性分析，不是全新独立测试。
+默认 `--lr-scheduler cosine`：前 2 轮由初始学习率的 50% 线性预热到设定值，随后按轮次余弦下降，计划末尾达到初始值的 1%（默认从 0.0001 到 0.000001）。它不根据波动的验证 macro-F1 决定何时降学习率；该指标只用于保存最佳权重和早停。若续训超过原计划轮数，学习率维持在下限，不会余弦反弹。Lightning 每轮记录实际学习率。`--lr-scheduler plateau` 保留供旧实验复现，`--lr-scheduler none` 可运行固定学习率对照；**不会叠加两种调度器**。标签平滑保持关闭（交叉熵默认 `label_smoothing=0`）。先前 0.9893 的折外准确率来自**光度增强＋固定学习率**，并非新余弦方案的成绩；旧实验采用不同分折和训练耐心值，不能与今后的运行当作单变量对照。光度增强范围曾参考旧验证异常，因此同折比较属于探索性分析，不是全新独立测试。
 
 当前只提供四分类训练与评估入口；旧五分类权重即使存在，也不能直接用于四分类。早停主要减少最佳验证轮次之后的无效训练，并不保证提高最佳分数。亮度审计、增强对照与压力测试的结果和解释统一见[亮度实验汇总](docs/bbbc045_brightness_findings.md)；测试错分及标签来源核查见[测试与标签异常记录](docs/bbbc045_test_audit.md)。
 
@@ -92,7 +92,7 @@ python -m leukocyte_analysis.cross_validate --smoke-test --init random --batch-s
 再运行按新 CRF101 同组规则分折的完整实验；每折最多 30 轮，耗时可能明显增加，不会由上述冒烟命令自动启动。命令显式列出关键选项以便复现本次配置：
 
 ```powershell
-python -m leukocyte_analysis.cross_validate --folds 3 --init imagenet --lr 0.0001 --epochs 30 --batch-size 128 --augmentation flips_photometric --lr-scheduler plateau
+python -m leukocyte_analysis.cross_validate --folds 3 --init imagenet --lr 0.0001 --epochs 30 --batch-size 128 --augmentation flips_photometric --lr-scheduler cosine
 ```
 
 如需在**同一新分折**下比较固定学习率，其他设置不变、仅关闭调度：
