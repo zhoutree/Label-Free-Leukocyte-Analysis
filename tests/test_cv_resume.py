@@ -72,7 +72,8 @@ class TestResumeFold(unittest.TestCase):
                 "seed": 42,
                 "training": {"epochs": 20, "batch_size": 128, "learning_rate": 1e-4,
                              "weight_decay": 0.01, "augmentation": "flips_photometric",
-                             "early_stopping_patience": 5, "lr_scheduler": "plateau"},
+                             "early_stopping_patience": 5, "lr_scheduler": "plateau",
+                             "label_smoothing": 0.05},
                 "folds": [{"number": fold.number,
                            "train_donors": sorted(fold.train_donors),
                            "val_donors": sorted(fold.val_donors)} for fold in folds],
@@ -90,6 +91,7 @@ class TestResumeFold(unittest.TestCase):
                 self.assertEqual(args[5], 30)
                 self.assertEqual(kwargs["schedule_epochs"], 20)
                 self.assertEqual(kwargs["early_stopping_min_delta"], 0.0)
+                self.assertEqual(kwargs["label_smoothing"], 0.05)
                 checkpoint_dir = args[6] / "checkpoints"
                 checkpoint_dir.mkdir(parents=True)
                 (checkpoint_dir / "best.ckpt").touch()

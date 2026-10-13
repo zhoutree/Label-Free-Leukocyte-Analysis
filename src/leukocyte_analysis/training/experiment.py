@@ -36,6 +36,7 @@ def run_training(
     data_split_record: dict | None = None,
     schedule_epochs: int | None = None,
     early_stopping_min_delta: float = EARLY_STOP_MIN_DELTA,
+    label_smoothing: float = 0.0,
 ) -> None:
     """按验证 macro-F1 选最佳权重；可提前停止，冒烟模式不保存文件。"""
     if early_stopping_patience < 0:
@@ -51,7 +52,8 @@ def run_training(
     prepare_console_output()
     module = LeukocyteClassifier(backbone, class_weights, learning_rate, weight_decay,
                                  lr_scheduler=lr_scheduler,
-                                 schedule_epochs=schedule_epochs or epochs)
+                                 schedule_epochs=schedule_epochs or epochs,
+                                 label_smoothing=label_smoothing)
     checkpoint = None
     # 使用 Lightning 的 Rich 进度条按终端宽度排版；限制刷新频率以减少重绘。
     callbacks = [CompactRichProgressBar(refresh_rate=5)]

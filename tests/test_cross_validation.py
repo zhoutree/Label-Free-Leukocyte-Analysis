@@ -13,12 +13,16 @@ import torch
 from torch import nn
 
 from leukocyte_analysis.data.stats import write_train_stats
+from leukocyte_analysis.data.bbbc045_config import TEST_DONORS, TRAIN_DONORS, VAL_DONORS
 from leukocyte_analysis.data.cv_split import (
     build_donor_folds,
     write_fold_manifest,
 )
 from leukocyte_analysis.training.module import LeukocyteClassifier
 from leukocyte_analysis.training.error_logging import ValidationErrorLogger
+from leukocyte_analysis.training.cross_validation import (
+    continue_cross_validation, run_cross_validation,
+)
 from leukocyte_analysis.evaluation.error_records import ERROR_FIELDS, write_csv
 
 
@@ -43,6 +47,79 @@ class TestDonorCrossValidation(unittest.TestCase):
             self.assertFalse(fold.train_donors & fold.val_donors)
             self.assertFalse((fold.train_donors | fold.val_donors) & self.heldout)
             self.assertEqual(fold.train_donors | fold.val_donors, set(self.donors))
+
+    def test_first_fold_can_be_completed_later_without_retraining(self) -> None:
+        fields = ["file", "donor", "label", "row", "col", "split"]
+        labels = ("B", "eosinophil", "monocyte", "neutrophil")
+        records = [
+            {"file": f"{donor}/{label}/batch1/ch5_1.tif", "donor": donor,
+             "label": label, "row": "0", "col": "0",
+             "split": "test" if donor in TEST_DONORS else "train"}
+            for donor in sorted(TRAIN_DONORS | VAL_DONORS | TEST_DONORS)
+            for label in labels
+        ]
+
+        def loaders(fold_csv, *_args):
+            with fold_csv.open(newline="", encoding="utf-8") as handle:
+                donors = {row["donor"] for row in csv.DictReader(handle)
+                          if row["split"] == "val"}
+            return object(), SimpleNamespace(dataset=SimpleNamespace(donors=donors)), torch.ones(4)
+
+        def train(*args, **_kwargs):
+            checkpoint = args[6] / "checkpoints" / "best.ckpt"
+            checkpoint.parent.mkdir(parents=True)
+            checkpoint.touch()
+
+        def predict(_model, dataset, _batch_size, _device):
+            return [
+                {"packed_index": index, "donor": record["donor"],
+                 "true_index": labels.index(record["label"]),
+                 "predicted_index": labels.index(record["label"])}
+                for index, record in enumerate(records)
+                if record["donor"] in dataset.donors
+            ]
+
+        with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent) as temporary:
+            root = Path(temporary)
+            tiles = root / "tiles.npy"
+            tiles.touch()
+            output = root / "run"
+            module = "leukocyte_analysis.training.cross_validation"
+            with (patch(f"{module}.read_manifest", return_value=(fields, records)),
+                  patch(f"{module}.write_train_stats"),
+                  patch(f"{module}.make_loaders", side_effect=loaders),
+                  patch(f"{module}.build_resnet18", return_value=nn.Identity()),
+                  patch(f"{module}.run_training", side_effect=train) as training,
+                  patch(f"{module}.load_classifier", return_value=nn.Identity()),
+                  patch(f"{module}.predict", side_effect=predict),
+                  patch(f"{module}.L.seed_everything")):
+                first = run_cross_validation(
+                    root / "split.csv", tiles, output, n_splits=3, seed=42,
+                    epochs=30, batch_size=128, learning_rate=1e-4,
+                    weight_decay=0.01, initialization="random",
+                    augmentation="flips_photometric_geometric",
+                    early_stopping_patience=15, lr_scheduler="plateau",
+                    early_stopping_min_delta=0.0, label_smoothing=0.05,
+                    first_fold_only=True,
+                )
+                self.assertTrue(first["partial"])
+                self.assertEqual(first["plan"]["training"]["label_smoothing"], 0.05)
+                self.assertEqual(training.call_args_list[0].kwargs["label_smoothing"], 0.05)
+                self.assertEqual(training.call_args_list[0].kwargs["early_stopping_min_delta"], 0.0)
+                self.assertEqual(first["completed_folds"], 1)
+                self.assertEqual(training.call_count, 1)
+                self.assertFalse((output / "fold_02").exists())
+
+                complete = continue_cross_validation(output)
+                self.assertEqual(training.call_count, 3)
+                self.assertTrue(all(call.kwargs["label_smoothing"] == 0.05
+                                    for call in training.call_args_list))
+                self.assertFalse(complete.get("partial", False))
+                self.assertEqual(len(complete["fold_results"]), 3)
+                self.assertEqual(complete["out_of_fold"]["samples"],
+                                 4 * len(TRAIN_DONORS | VAL_DONORS))
+                with self.assertRaisesRegex(ValueError, "尚未完成"):
+                    continue_cross_validation(output)
 
     def test_crf101_years_stay_in_same_fold(self) -> None:
         records = [

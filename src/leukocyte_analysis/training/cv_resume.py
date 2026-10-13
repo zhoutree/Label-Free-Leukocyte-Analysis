@@ -103,6 +103,7 @@ def resume_cv_fold(source_dir: Path, output_dir: Path, *, fold_number: int,
         resume_checkpoint=last_checkpoint,
         schedule_epochs=settings["epochs"],
         early_stopping_min_delta=settings.get("early_stopping_min_delta", 0.0),
+        label_smoothing=settings.get("label_smoothing", 0.0),
     )
 
     original_rows = _read_predictions(fold_dir / "validation_predictions.csv")

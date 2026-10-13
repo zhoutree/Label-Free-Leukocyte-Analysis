@@ -1,5 +1,7 @@
 """使用 Lightning 管理优化步骤，使用 TorchMetrics 汇总整轮指标。"""
 
+import math
+
 import lightning as L
 import torch
 from torch import nn
@@ -30,6 +32,7 @@ class LeukocyteClassifier(L.LightningModule):
         weight_decay: float,
         lr_scheduler: str = "none",
         schedule_epochs: int = 30,
+        label_smoothing: float = 0.0,
     ) -> None:
         super().__init__()
         if len(CLASS_NAMES) != len(class_weights):
@@ -38,6 +41,8 @@ class LeukocyteClassifier(L.LightningModule):
             raise ValueError(f"未知学习率调度方式：{lr_scheduler}")
         if schedule_epochs < 1:
             raise ValueError("学习率计划轮数必须大于 0")
+        if not math.isfinite(label_smoothing) or not 0 <= label_smoothing < 1:
+            raise ValueError("标签平滑系数必须在 [0, 1) 内")
         self.save_hyperparameters(ignore=("backbone", "class_weights"))
         self.backbone = backbone
         self.class_names = CLASS_NAMES
@@ -46,9 +51,11 @@ class LeukocyteClassifier(L.LightningModule):
         self.weight_decay = weight_decay
         self.lr_scheduler = lr_scheduler
         self.schedule_epochs = schedule_epochs
+        self.label_smoothing = label_smoothing
 
         self.train_loss = MeanMetric()
         self.train_weighted_loss = MeanMetric()
+        self.train_objective_loss = MeanMetric()
         self.val_loss = MeanMetric()
         self.val_f1 = MulticlassF1Score(num_classes=len(self.class_names), average="macro")
         self.val_recall = MulticlassRecall(num_classes=len(self.class_names), average=None)
@@ -70,14 +77,18 @@ class LeukocyteClassifier(L.LightningModule):
         """加权 CE 更新参数；未加权 CE 用于和验证曲线比较。"""
         images, targets = batch
         logits = self(images)
-        objective = F.cross_entropy(logits, targets, weight=self.class_weights)
+        objective = F.cross_entropy(logits, targets, weight=self.class_weights,
+                                    label_smoothing=self.label_smoothing)
         per_cell_loss = F.cross_entropy(logits.detach(), targets, reduction="none")
 
-        # MeanMetric 按细胞而非按批次汇总，避免最后一个小批次造成偏差。
+        # 前两项保留未平滑口径，便于与旧实验比较；另记录实际优化目标。
         self.train_loss.update(per_cell_loss)
         self.train_weighted_loss.update(per_cell_loss, weight=self.class_weights[targets])
+        self.train_objective_loss.update(objective.detach(), weight=len(targets))
         self.log("train_loss", self.train_loss, on_step=False, on_epoch=True)
         self.log("train_weighted_loss", self.train_weighted_loss, on_step=False, on_epoch=True)
+        self.log("train_objective_loss", self.train_objective_loss,
+                 on_step=False, on_epoch=True)
         self.log("step_weighted_loss", objective.detach(), on_step=True, on_epoch=False,
                  prog_bar=True, logger=False)
         return objective

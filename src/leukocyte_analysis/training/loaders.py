@@ -11,6 +11,9 @@ from ..data.bbbc045_config import CLASS_NAMES
 from ..data.dataset import LeukocyteDataset
 
 
+AUGMENTATION_MODES = ("none", "flips", "flips_photometric", "flips_photometric_geometric")
+
+
 def make_loaders(
     split_csv: Path,
     tiles_npy: Path,
@@ -21,17 +24,39 @@ def make_loaders(
     augmentation: str = "none",
 ) -> tuple[DataLoader, DataLoader, torch.Tensor]:
     """只增强训练集、只用训练标签计算权重；验证集保持原始分布。"""
-    if augmentation not in {"none", "flips", "flips_photometric"}:
+    if augmentation not in AUGMENTATION_MODES:
         raise ValueError(f"未知增强方式：{augmentation}")
     # 翻转不会插值或裁掉 55×55 图中的细胞结构。
-    train_transform = (
-        v2.Compose([v2.RandomHorizontalFlip(), v2.RandomVerticalFlip()])
-        if augmentation != "none" else None
-    )
-    raw_transform = (
-        v2.ColorJitter(brightness=(0.8, 1.25), contrast=(0.9, 1.1))
-        if augmentation == "flips_photometric" else None
-    )
+    geometry = [v2.RandomHorizontalFlip(), v2.RandomVerticalFlip()]
+    if augmentation == "flips_photometric_geometric":
+        geometry.extend([
+            v2.RandomChoice([
+                v2.Identity(),
+                v2.RandomRotation((90, 90)),
+                v2.RandomRotation((180, 180)),
+                v2.RandomRotation((270, 270)),
+            ]),
+            # 灰度已按训练集统计量归一化；填充值 0 对应训练集均值。
+            v2.RandomApply([
+                v2.RandomAffine(
+                    degrees=15, translate=(0.04, 0.04),
+                    scale=(0.95, 1.05),
+                    interpolation=v2.InterpolationMode.BILINEAR, fill=0.0,
+                )
+            ], p=0.5),
+        ])
+    train_transform = v2.Compose(geometry) if augmentation != "none" else None
+    raw_transform = None
+    if augmentation in {"flips_photometric", "flips_photometric_geometric"}:
+        color_jitter = v2.ColorJitter(brightness=(0.8, 1.25), contrast=(0.9, 1.1))
+        raw_transform = color_jitter
+        if augmentation == "flips_photometric_geometric":
+            # 原始浮点灰度约为 0.003；噪声须远小于像素尺度，且不裁剪到 [0, 1]。
+            raw_transform = v2.Compose([
+                color_jitter,
+                v2.RandomApply([v2.GaussianBlur(3, sigma=(0.2, 0.6))], p=0.2),
+                v2.RandomApply([v2.GaussianNoise(sigma=2e-5, clip=False)], p=0.2),
+            ])
     common = (split_csv, tiles_npy, stats_json)
     train_set = LeukocyteDataset(*common, "train", transform=train_transform,
                                  raw_transform=raw_transform)

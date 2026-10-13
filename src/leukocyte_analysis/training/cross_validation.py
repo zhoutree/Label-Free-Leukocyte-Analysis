@@ -72,8 +72,17 @@ def run_cross_validation(
     learning_rate: float, weight_decay: float, initialization: str,
     augmentation: str, early_stopping_patience: int, smoke_test: bool = False,
     lr_scheduler: str = "none",
+    first_fold_only: bool = False,
+    continue_run: bool = False,
+    label_smoothing: float = 0.0,
+    early_stopping_min_delta: float = EARLY_STOP_MIN_DELTA,
 ) -> dict:
     """逐折重算统计量、重新初始化训练，并汇总折外预测。"""
+    output_dir = output_dir.resolve()
+    if smoke_test and (first_fold_only or continue_run):
+        raise ValueError("冒烟测试不能与分阶段交叉验证同时使用")
+    if first_fold_only and continue_run:
+        raise ValueError("首次只跑第一折与接续剩余折不能同时使用")
     fields, records = read_manifest(split_csv)
     expected_donors = TRAIN_DONORS | VAL_DONORS | TEST_DONORS
     if {row["donor"] for row in records} != expected_donors:
@@ -83,8 +92,6 @@ def run_cross_validation(
     if not tiles_npy.is_file():
         raise FileNotFoundError(tiles_npy)
     folds = build_donor_folds(records, n_splits, seed)
-    output_dir.mkdir(parents=True, exist_ok=False)
-
     plan = {
         "method": "StratifiedGroupKFold",
         "group_overrides": CV_GROUP_OVERRIDES,
@@ -98,6 +105,7 @@ def run_cross_validation(
             "epochs": epochs, "batch_size": batch_size,
             "learning_rate": learning_rate, "weight_decay": weight_decay,
             "initialization": initialization, "augmentation": augmentation,
+            "label_smoothing": label_smoothing,
             "lr_scheduler": lr_scheduler,
             "plateau_settings": {
                 "factor": PLATEAU_FACTOR, "patience": PLATEAU_PATIENCE,
@@ -110,7 +118,7 @@ def run_cross_validation(
                 "min_epochs_before_early_stop": min(COSINE_MIN_EPOCHS, epochs),
             } if lr_scheduler == "cosine" else None,
             "early_stopping_patience": early_stopping_patience,
-            "early_stopping_min_delta": EARLY_STOP_MIN_DELTA,
+            "early_stopping_min_delta": early_stopping_min_delta,
         },
         "folds": [
             {"number": fold.number, "train_donors": sorted(fold.train_donors),
@@ -118,16 +126,46 @@ def run_cross_validation(
             for fold in folds
         ],
     }
-    (output_dir / "plan.json").write_text(
-        json.dumps(plan, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+    results = []
+    all_predictions = []
+    if continue_run:
+        saved_plan = json.loads((output_dir / "plan.json").read_text(encoding="utf-8"))
+        # 旧分阶段运行尚无此字段；0 与关闭标签平滑等价，仍可安全接续。
+        if "label_smoothing" not in saved_plan["training"] and label_smoothing == 0:
+            del plan["training"]["label_smoothing"]
+        if saved_plan != plan:
+            raise ValueError("原运行的分折或训练配置与当前代码不一致，不能接续")
+        saved_summary = json.loads((output_dir / "summary.json").read_text(encoding="utf-8"))
+        if not saved_summary.get("partial") or saved_summary.get("plan") != plan:
+            raise ValueError("只能接续同一计划下尚未完成的交叉验证")
+        results = saved_summary["fold_results"]
+        if [item["fold"] for item in results] != list(range(1, len(results) + 1)):
+            raise ValueError("已完成的折不是从第一折开始连续排列")
+        for item in results:
+            fold = folds[item["fold"] - 1]
+            with (output_dir / f"fold_{fold.number:02d}" / "validation_predictions.csv").open(
+                newline="", encoding="utf-8"
+            ) as handle:
+                rows = list(csv.DictReader(handle))
+            if (len(rows) != item["val_tiles"]
+                    or {row["donor"] for row in rows} != fold.val_donors
+                    or _metrics(rows) != item["metrics"]
+                    or not Path(item["checkpoint"]).is_file()):
+                raise ValueError(f"第 {fold.number} 折的保存结果不完整")
+            all_predictions.extend(rows)
+    else:
+        output_dir.mkdir(parents=True, exist_ok=False)
+        (output_dir / "plan.json").write_text(
+            json.dumps(plan, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    all_predictions = []
-    results = []
-    for fold in folds[:1] if smoke_test else folds:
+    selected_folds = folds[:1] if smoke_test or first_fold_only else folds
+    for fold in selected_folds[len(results):]:
         print(f"第 {fold.number}/{n_splits} 折；验证受试者：{', '.join(sorted(fold.val_donors))}")
         fold_dir = output_dir / f"fold_{fold.number:02d}"
+        if fold_dir.exists():
+            raise FileExistsError(f"第 {fold.number} 折已有未登记的文件，避免覆盖：{fold_dir}")
         data_dir = fold_dir / "data"
         fold_csv = data_dir / "split.csv"
         counts = write_fold_manifest(fields, records, fold, fold_csv)
@@ -145,6 +183,8 @@ def run_cross_validation(
             backbone, train_loader, val_loader, weights, device, epochs,
             training_dir, learning_rate, weight_decay, smoke_test,
             early_stopping_patience, lr_scheduler=lr_scheduler,
+            early_stopping_min_delta=early_stopping_min_delta,
+            label_smoothing=label_smoothing,
         )
         if smoke_test:
             break
@@ -165,12 +205,39 @@ def run_cross_validation(
             "checkpoint": str(checkpoint), "metrics": _metrics(predictions),
         })
         all_predictions.extend(predictions)
+        if fold.number < n_splits:
+            (output_dir / "summary.json").write_text(json.dumps({
+                "smoke_test": False, "partial": True,
+                "completed_folds": len(results), "plan": plan,
+                "fold_results": results,
+            }, ensure_ascii=False, indent=2), encoding="utf-8")
 
     if smoke_test:
         summary = {"smoke_test": True, "completed_folds": 1, "plan": plan}
+    elif first_fold_only:
+        summary = {"smoke_test": False, "partial": True,
+                   "completed_folds": len(results), "plan": plan,
+                   "fold_results": results}
     else:
         summary = summarize_predictions(plan, results, all_predictions, records)
     (output_dir / "summary.json").write_text(
         json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8"
     )
     return summary
+
+
+def continue_cross_validation(output_dir: Path) -> dict:
+    """按原 plan.json 的设置接着训练未完成折，不覆盖已完成的折。"""
+    plan = json.loads((output_dir / "plan.json").read_text(encoding="utf-8"))
+    settings = plan["training"]
+    return run_cross_validation(
+        Path(plan["source_manifest"]), Path(plan["packed_tiles"]), output_dir,
+        n_splits=len(plan["folds"]), seed=plan["seed"],
+        epochs=settings["epochs"], batch_size=settings["batch_size"],
+        learning_rate=settings["learning_rate"], weight_decay=settings["weight_decay"],
+        initialization=settings["initialization"], augmentation=settings["augmentation"],
+        early_stopping_patience=settings["early_stopping_patience"],
+        lr_scheduler=settings["lr_scheduler"], continue_run=True,
+        label_smoothing=settings.get("label_smoothing", 0.0),
+        early_stopping_min_delta=settings.get("early_stopping_min_delta", 0.0),
+    )

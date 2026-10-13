@@ -1,6 +1,7 @@
 """BBBC045 明场分类训练入口：读取参数并组装训练组件。"""
 
 import argparse
+import math
 import os
 from datetime import datetime
 from pathlib import Path
@@ -11,8 +12,8 @@ import torch
 from .data.bbbc045_config import CLASS_NAMES, CV_GROUP_OVERRIDES
 from .data.split import read_manifest, summarize_split_groups
 from .models.resnet import build_resnet18
-from .training.experiment import run_training
-from .training.loaders import make_loaders
+from .training.experiment import EARLY_STOP_MIN_DELTA, run_training
+from .training.loaders import AUGMENTATION_MODES, make_loaders
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -24,15 +25,20 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--epochs", type=int, default=30)
     parser.add_argument("--batch-size", type=int, default=128)
     parser.add_argument("--lr", type=float, default=1e-4, help="AdamW 学习率；ImageNet 微调基线默认 0.0001")
-    parser.add_argument("--lr-scheduler", choices=("none", "plateau", "cosine"), default="cosine",
-                        help="默认按轮次预热＋余弦退火；plateau 保留供旧实验复现")
+    parser.add_argument("--lr-scheduler", choices=("none", "plateau", "cosine"), default="plateau",
+                        help="默认按验证 macro-F1 停滞情况降低学习率；可选择余弦调度")
     parser.add_argument("--weight-decay", type=float, default=0.01, help="AdamW 权重衰减；不是 L1 正则化")
     parser.add_argument("--init", choices=("imagenet", "random"), default="imagenet", help="模型权重初始化方式")
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--augmentation", choices=("none", "flips", "flips_photometric"),
-                        default="flips_photometric", help="训练集增强；默认同时扰动原始灰度的亮度与对比度")
-    parser.add_argument("--early-stopping-patience", type=int, default=10,
+    parser.add_argument("--augmentation", choices=AUGMENTATION_MODES,
+                        default="flips_photometric_geometric",
+                        help="训练集增强；默认翻转、亮度／对比度扰动和保守几何变换")
+    parser.add_argument("--early-stopping-patience", type=int, default=15,
                         help="验证 macro-F1 连续多少轮未提高就停止；0 表示禁用")
+    parser.add_argument("--early-stopping-min-delta", type=float,
+                        default=EARLY_STOP_MIN_DELTA)
+    parser.add_argument("--label-smoothing", type=float, default=0.0,
+                        help="训练加权交叉熵的标签平滑系数；0 表示关闭")
     parser.add_argument("--smoke-test", action="store_true", help="只跑两批，不保存权重")
     parser.add_argument("--split-csv", type=Path, default=PROJECT_ROOT / "data/processed/bbbc045_split.csv")
     parser.add_argument("--tiles-npy", type=Path, default=PROJECT_ROOT / "data/processed/bbbc045_tiles.npy")
@@ -42,6 +48,10 @@ def parse_args() -> argparse.Namespace:
     if (args.epochs < 1 or args.batch_size < 1 or args.lr <= 0
             or args.weight_decay < 0 or args.early_stopping_patience < 0):
         parser.error("epochs、batch-size 和 lr 必须大于 0；weight-decay 和 early-stopping-patience 不得小于 0")
+    if (not math.isfinite(args.label_smoothing) or not 0 <= args.label_smoothing < 1
+            or not math.isfinite(args.early_stopping_min_delta)
+            or args.early_stopping_min_delta < 0):
+        parser.error("标签平滑系数必须在 [0, 1) 内；早停最小改善量须为非负有限数")
     return args
 
 
@@ -63,16 +73,20 @@ def main() -> None:
     )
     print("四分类：", CLASS_NAMES, "初始化：", args.init, "AdamW weight_decay：", args.weight_decay,
           "训练增强：", args.augmentation, "学习率调度：", args.lr_scheduler,
-          "早停耐心值：", args.early_stopping_patience)
+          "早停耐心值：", args.early_stopping_patience,
+          "标签平滑：", args.label_smoothing)
     model = build_resnet18(len(CLASS_NAMES), initialization=args.init)
     output_dir = args.output_dir or PROJECT_ROOT / "runs" / (
-        f"resnet18_four_{args.init}_{args.augmentation}_{args.lr_scheduler}_"
+        f"resnet18_four_{args.init}_{args.augmentation}_{args.lr_scheduler}"
+        f"{'_ls' + format(args.label_smoothing, 'g') if args.label_smoothing else ''}_"
         f"{datetime.now():%Y%m%d_%H%M%S}"
     )
     run_training(
         model, train_loader, val_loader, weights, device,
         args.epochs, output_dir, args.lr, args.weight_decay, args.smoke_test,
         args.early_stopping_patience, lr_scheduler=args.lr_scheduler,
+        early_stopping_min_delta=args.early_stopping_min_delta,
+        label_smoothing=args.label_smoothing,
         data_split_record={
             "source_manifest": str(args.split_csv.resolve()),
             "group_overrides": CV_GROUP_OVERRIDES,

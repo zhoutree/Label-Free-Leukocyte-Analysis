@@ -12,8 +12,10 @@ from unittest.mock import patch
 import numpy as np
 import torch
 from torch import nn
+from torch.nn import functional as F
 from torchmetrics.classification import MulticlassF1Score, MulticlassRecall
 from torchvision.models import ResNet18_Weights, resnet18
+from torchvision.transforms import v2
 
 from leukocyte_analysis.data.bbbc045_config import CLASS_NAMES, model_label
 from leukocyte_analysis.data.dataset import LeukocyteDataset
@@ -22,6 +24,7 @@ from leukocyte_analysis.models.resnet import build_resnet18
 from leukocyte_analysis.cross_validate import parse_args as parse_cv_args
 from leukocyte_analysis.train import PROJECT_ROOT, parse_args
 from leukocyte_analysis.training.loaders import make_loaders
+from leukocyte_analysis.training.module import LeukocyteClassifier
 from leukocyte_analysis.training.progress import CompactRichProgressBar
 
 
@@ -34,22 +37,67 @@ class TestTrainingConfiguration(unittest.TestCase):
         self.assertEqual(args.init, "imagenet")
         self.assertEqual(args.lr, 1e-4)
         self.assertEqual(args.weight_decay, 0.01)
-        self.assertEqual(args.augmentation, "flips_photometric")
-        self.assertEqual(args.lr_scheduler, "cosine")
+        self.assertEqual(args.augmentation, "flips_photometric_geometric")
+        self.assertEqual(args.lr_scheduler, "plateau")
         self.assertEqual(args.epochs, 30)
-        self.assertEqual(args.early_stopping_patience, 10)
+        self.assertEqual(args.early_stopping_patience, 15)
+        self.assertEqual(args.label_smoothing, 0.0)
         self.assertFalse(hasattr(args, "task"))
 
     def test_cross_validation_defaults_and_old_baseline_remain_selectable(self) -> None:
         with patch.object(sys, "argv", ["leukocyte-cross-validate"]):
             args = parse_cv_args()
         self.assertEqual((args.augmentation, args.lr_scheduler),
-                         ("flips_photometric", "cosine"))
-        self.assertEqual((args.epochs, args.early_stopping_patience), (30, 10))
+                         ("flips_photometric_geometric", "plateau"))
+        self.assertEqual((args.epochs, args.early_stopping_patience), (30, 15))
+        self.assertEqual(args.label_smoothing, 0.0)
         with patch.object(sys, "argv", ["leukocyte-train", "--augmentation", "flips",
                                             "--lr-scheduler", "none"]):
             old = parse_args()
         self.assertEqual((old.augmentation, old.lr_scheduler), ("flips", "none"))
+
+    def test_first_fold_and_continue_options_are_exclusive(self) -> None:
+        with patch.object(sys, "argv", ["leukocyte-cross-validate", "--first-fold-only"]):
+            self.assertTrue(parse_cv_args().first_fold_only)
+        with patch.object(sys, "argv", ["leukocyte-cross-validate", "--continue-run", "run"]):
+            self.assertEqual(parse_cv_args().continue_run, Path("run"))
+        with patch.object(sys, "argv", ["leukocyte-cross-validate", "--first-fold-only",
+                                            "--continue-run", "run"]):
+            with patch("sys.stderr"):
+                with self.assertRaises(SystemExit):
+                    parse_cv_args()
+
+    def test_label_smoothing_cli_is_validated(self) -> None:
+        with patch.object(sys, "argv", ["leukocyte-cross-validate", "--label-smoothing", "0.05",
+                                        "--early-stopping-min-delta", "0"]):
+            args = parse_cv_args()
+        self.assertEqual((args.label_smoothing, args.early_stopping_min_delta), (0.05, 0.0))
+        for invalid in ("-0.1", "1", "nan"):
+            with patch.object(sys, "argv", ["leukocyte-cross-validate", "--label-smoothing",
+                                            invalid]):
+                with patch("sys.stderr"), self.assertRaises(SystemExit):
+                    parse_cv_args()
+
+    def test_smoothing_changes_only_training_objective(self) -> None:
+        backbone = nn.Linear(2, len(CLASS_NAMES), bias=False)
+        with torch.no_grad():
+            backbone.weight.copy_(torch.arange(8, dtype=torch.float32).reshape(4, 2) / 10)
+        weights = torch.tensor([1.0, 2.0, 3.0, 4.0])
+        images = torch.tensor([[1.0, 0.0], [0.0, 1.0]])
+        targets = torch.tensor([0, 2])
+        model = LeukocyteClassifier(backbone, weights, 1e-4, 0.0, label_smoothing=0.05)
+        with patch.object(model, "log"):
+            actual = model.training_step((images, targets), 0)
+            model.validation_step((images, targets), 0)
+        logits = backbone(images)
+        expected = F.cross_entropy(logits, targets, weight=weights, label_smoothing=0.05)
+        self.assertTrue(torch.allclose(actual, expected))
+        self.assertTrue(torch.allclose(model.val_loss.compute(),
+                                       F.cross_entropy(logits, targets)))
+        self.assertAlmostEqual(model.train_objective_loss.compute().item(), expected.item())
+        self.assertAlmostEqual(model.label_smoothing, 0.05)
+        with self.assertRaisesRegex(ValueError, "标签平滑"):
+            LeukocyteClassifier(backbone, weights, 1e-4, 0.0, label_smoothing=1.0)
 
     def test_b_and_t_map_to_lymphocyte(self) -> None:
         self.assertEqual(CLASS_NAMES,
@@ -156,12 +204,51 @@ class TestTrainingConfiguration(unittest.TestCase):
         train_kwargs = dataset_type.call_args_list[0].kwargs
         val_kwargs = dataset_type.call_args_list[1].kwargs
         self.assertIsNotNone(train_kwargs["transform"])
+        self.assertEqual(len(train_kwargs["transform"].transforms), 2)
         self.assertIsNotNone(train_kwargs["raw_transform"])
         self.assertNotIn("raw_transform", val_kwargs)
         self.assertNotIn("transform", val_kwargs)
         transformed = train_kwargs["raw_transform"](torch.full((1, 55, 55), 0.003))
         self.assertEqual(tuple(transformed.shape), (1, 55, 55))
         self.assertEqual(transformed.dtype, torch.float32)
+
+    def test_geometric_augmentation_only_reaches_training_set(self) -> None:
+        training_set = SimpleNamespace(samples=[(index, index, "donor") for index in range(4)])
+        validation_set = SimpleNamespace(samples=[])
+        with patch("leukocyte_analysis.training.loaders.LeukocyteDataset",
+                   side_effect=[training_set, validation_set]) as dataset_type:
+            with patch("leukocyte_analysis.training.loaders.DataLoader",
+                       side_effect=[object(), object()]):
+                make_loaders(None, None, None, 8, 42, torch.device("cpu"),
+                             "flips_photometric_geometric")
+        train_kwargs = dataset_type.call_args_list[0].kwargs
+        val_kwargs = dataset_type.call_args_list[1].kwargs
+        transforms = train_kwargs["transform"].transforms
+        self.assertEqual(len(transforms), 4)
+        self.assertIsInstance(transforms[2], v2.RandomChoice)
+        self.assertIsInstance(transforms[3], v2.RandomApply)
+        affine = transforms[3].transforms[0]
+        self.assertIsInstance(affine, v2.RandomAffine)
+        self.assertEqual(tuple(affine.scale), (0.95, 1.05))
+        raw_transforms = train_kwargs["raw_transform"].transforms
+        self.assertEqual(len(raw_transforms), 3)
+        self.assertIsInstance(raw_transforms[1].transforms[0], v2.GaussianBlur)
+        noise = raw_transforms[2].transforms[0]
+        self.assertIsInstance(noise, v2.GaussianNoise)
+        self.assertEqual(noise.sigma, 2e-5)
+        self.assertFalse(noise.clip)
+        self.assertNotIn("transform", val_kwargs)
+        self.assertNotIn("raw_transform", val_kwargs)
+        image = torch.randn(1, 55, 55)
+        for _ in range(8):
+            transformed = train_kwargs["transform"](image)
+            self.assertEqual(tuple(transformed.shape), (1, 55, 55))
+            self.assertTrue(torch.isfinite(transformed).all())
+        raw_image = torch.full((1, 55, 55), 0.003)
+        for _ in range(8):
+            transformed = train_kwargs["raw_transform"](raw_image)
+            self.assertEqual(tuple(transformed.shape), (1, 55, 55))
+            self.assertTrue(torch.isfinite(transformed).all())
 
     def test_pretrained_backbone_and_small_image_layers(self) -> None:
         # 用本地构造的模型代替下载，验证传入的权重枚举与替换后的结构。
