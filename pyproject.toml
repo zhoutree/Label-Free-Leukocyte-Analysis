@@ -8,8 +8,23 @@ version = "0.1.0"
 description = "Label-free brightfield leukocyte classification experiments"
 readme = "README.md"
 requires-python = ">=3.10"
+dependencies = [
+    "torch",
+    "torchvision",
+    "numpy",
+    "pillow",
+    "tifffile",
+    "lightning",
+    "rich",
+    "torchmetrics",
+    "tensorboard",
+    "scikit-learn",
+    "matplotlib",
+    "scipy",
+]
 
 [project.scripts]
+leukocyte-prepare-data = "leukocyte_analysis.prepare_data:main"
 leukocyte-train = "leukocyte_analysis.train:main"
 leukocyte-evaluate = "leukocyte_analysis.evaluate:main"
 leukocyte-record-errors = "leukocyte_analysis.record_errors:main"

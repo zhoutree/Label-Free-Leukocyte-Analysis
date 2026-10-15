@@ -11,7 +11,8 @@ import torch
 from .data.bbbc045_config import CLASS_NAMES, CV_GROUP_OVERRIDES
 from .data.split import read_manifest, summarize_split_groups
 from .models.resnet import build_resnet18
-from .training.arguments import PROJECT_ROOT, add_training_arguments, validate_training_arguments
+from .training.arguments import (DEFAULT_TRAIN_EPOCHS, PROJECT_ROOT,
+                                 add_training_arguments, validate_training_arguments)
 from .training.experiment import run_training
 from .training.loaders import make_loaders
 
@@ -19,7 +20,7 @@ from .training.loaders import make_loaders
 def parse_args() -> argparse.Namespace:
     """读取命令行参数，并检查训练配置是否合法。"""
     parser = argparse.ArgumentParser(description=__doc__)
-    add_training_arguments(parser)
+    add_training_arguments(parser, default_epochs=DEFAULT_TRAIN_EPOCHS)
     parser.add_argument("--smoke-test", action="store_true", help="只跑两批，不保存权重")
     parser.add_argument("--stats-json", type=Path, default=PROJECT_ROOT / "data/processed/bbbc045_train_stats.json")
     args = parser.parse_args()

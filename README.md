@@ -1,8 +1,116 @@
 # Label-Free Leukocyte Analysis
 
-使用 BBBC045 的明场图像训练四分类模型：淋巴细胞（B＋T）、嗜酸性粒细胞、单核细胞、中性粒细胞。模型为适配 55×55 单通道图块的 ResNet-18；训练、验证和测试按受试者分开，完整训练默认从 ImageNet-1K 预训练权重微调。这四类不构成完整的临床血常规分类：数据集中未单列嗜碱性粒细胞等群体。
+基于 BBBC045 的 55×55 单通道明场图块，训练四类白细胞分类器：淋巴细胞（B＋T）、嗜酸性粒细胞、单核细胞和中性粒细胞。模型使用适配小图的 ResNet-18，从 ImageNet-1K 权重微调；按受试者划分数据，归一化统计量仅由相应训练侧计算。
 
-新对话可先看[实验索引](docs/experiment_index.md)了解当前结果与证据入口；协作约定见 [AGENTS.md](AGENTS.md)。
+## 主要结果与边界
+
+| 评估方式 | 图块数 | Accuracy | Macro-F1 |
+| --- | ---: | ---: | ---: |
+| 三折受试者分组交叉验证的折外预测 | 84,815 | **99.39%** | **0.9816** |
+| 常规训练模型在原保留测试受试者上的评估 | 15,290 | **99.05%** | **0.9711** |
+
+两行来自不同训练与评估流程，不能当成同一模型在同一数据集上的前后提升。原保留测试集（CRF049、CRF066）已经用于多次事后分析，**不再是全新独立测试**；上述结果也不代表跨仪器泛化或临床性能。任务只对已裁切的四类细胞图块分类，未覆盖嗜碱性粒细胞，不能代替完整的五分类血常规。运行配置、每折结果和局限见[实验索引](docs/experiment_index.md)；协作约定见 [AGENTS.md](AGENTS.md)。
+
+## 项目流程
+
+<p align="center">
+  <img src="docs/assets/workflow.svg" alt="从 BBBC045 明场原图到图块、受试者分组、三折折外评估和原保留测试集评估的项目流程" width="860">
+</p>
+
+两条评估路径使用不同训练流程，不能将两组结果直接当作同一模型的前后提升。每折的归一化均值、标准差和类别权重仅由该折训练图块计算；常规训练也只用原训练集计算，不让验证或测试图块参与拟合。原始 B/T 标签保留在清单中，进入四分类模型时才合并。
+
+下图是原始图块的缩略展示（按 B、T、嗜酸性粒、单核、中性粒细胞排列），不是模型预测结果。[点开查看完整尺寸](docs/assets/bbbc045_examples.png)。
+
+<p align="center">
+  <a href="docs/assets/bbbc045_examples.png"><img src="docs/assets/bbbc045_examples.png" alt="BBBC045 明场白细胞原始图块，五行分别为 B、T、嗜酸性粒、单核和中性粒细胞" width="520"></a>
+</p>
+
+## 模型结构
+
+<p align="center">
+  <img src="docs/assets/model_architecture.svg" alt="55 乘 55 单通道图块经三乘三输入卷积、ResNet-18 残差层、全局平均池化和四分类头输出" width="860">
+</p>
+
+残差主体使用 ImageNet-1K 预训练权重；单通道输入层和四分类头重新初始化。增强**只作用于训练图块**，验证／测试沿用同一训练侧归一化参数，不做随机扰动。实现见[模型构建](src/leukocyte_analysis/models/resnet.py)和[数据加载](src/leukocyte_analysis/training/loaders.py)。
+
+## 结果可视化
+
+下图来自上表的**常规训练模型**：左侧为逐轮验证 macro-F1，右侧为训练／验证的未加权交叉熵。实际优化目标还包含类别权重和标签平滑，不能直接把它的数值与图中的 `val_loss` 比较；图中的 F1 **不是训练集 F1，也不是测试集曲线**。
+
+<p align="center">
+  <a href="docs/assets/training_curves.png"><img src="docs/assets/training_curves.png" alt="常规训练的验证 macro-F1 及训练和验证损失曲线" width="820"></a>
+</p>
+
+下图是同一模型在**原保留测试受试者** CRF049、CRF066 上的计数混淆矩阵，行是真实类别，列是预测类别。单核细胞召回率为 91.16%，仍是相对弱项；该测试集已经被多次分析，不能将图称为全新独立测试结果。
+
+<p align="center">
+  <a href="docs/assets/confusion_matrix_counts.png"><img src="docs/assets/confusion_matrix_counts.png" alt="原保留测试集的四类白细胞计数混淆矩阵" width="580"></a>
+</p>
+
+两张结果图分别来自运行 `resnet18_four_imagenet_flips_photometric_geometric_plateau_ls0.05_20261014_145319` 的 `csv/metrics.csv` 和 `test_evaluation/`；原始运行目录不随 Git 发布。训练指标也可在运行目录的 TensorBoard 日志中查看；评估时的混淆矩阵由[绘图模块](src/leukocyte_analysis/evaluation/plots.py)生成。详细分折结果与亮度局限见[实验索引](docs/experiment_index.md)。
+
+## 从零准备环境和数据
+
+数据来源：[Broad Bioimage Benchmark Collection 的 BBBC045v1 官方页](https://bbbc.broadinstitute.org/BBBC045)。按官网推荐，引用本数据集时注明 “We used image set BBBC045v1, available from the Broad Bioimage Benchmark Collection [Ljosa et al., Nature Methods, 2012].” 本项目只读取官方 `BBBC045_Stained_Montages.zip` 中的 `ch5_*.tif` 明场 montage；不需要另一个 CIF 压缩包。原始目录名提供 B、T、嗜酸性粒、单核和中性粒细胞标签，模型读取时才将 B/T 合并为淋巴细胞。
+
+普通读者可先用 Python 3.11 建立虚拟环境。下面是 Windows PowerShell 的 **CPU 安装示例**；Linux/macOS 的虚拟环境激活命令不同，PyTorch 的 CPU/GPU 安装命令应按[官方安装选择器](https://pytorch.org/get-started/locally/)选择。`pyproject.toml` 声明其余运行依赖；已有 CUDA 13.2 环境的作者可继续使用 `environment.yml`，无需为 CPU 重建。
+
+```powershell
+py -3.11 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+python -m pip install -e .
+python -m pip check
+```
+
+在[官方页](https://bbbc.broadinstitute.org/BBBC045)下载 `BBBC045_Stained_Montages.zip`，将压缩包保存在项目外，然后解压到被 Git 忽略的目录：
+
+```powershell
+$zip = Read-Host "请粘贴下载的 BBBC045_Stained_Montages.zip 完整路径"
+Expand-Archive -LiteralPath $zip -DestinationPath .\data\raw
+Get-ChildItem .\data\raw -Directory
+```
+
+数据根目录必须**直接**包含 `CRF022/` 等受试者目录；例如 `data/raw/Stained_Montages/CRF022/T/batch1/ch5_*.tif`。若解压后多出一层目录，请把 `--data-root` 指向实际含 `CRF*` 子目录的那一层。原图也可以放在项目外，本机现有路径是 `../Stained_Montages/`；`data/raw/` 和生成的 `data/processed/` 均被 Git 忽略。
+
+在项目根目录按顺序生成原始清单、固定受试者 train/val/test 划分、55×55 图块包和**仅从 train 计算**的归一化统计量：
+
+```powershell
+python -m leukocyte_analysis.prepare_data --data-root .\data\raw\Stained_Montages
+# 若已将原图解压在项目外，改用：
+# python -m leukocyte_analysis.prepare_data --data-root ..\Stained_Montages
+```
+
+命令复用 `data/` 下已有的清单、划分、打包、抽查和统计模块，默认输出到 `data/processed/`。目标文件只要已有一个就会拒绝启动，不覆盖旧实验数据；需要另一份结果时使用 `--output-dir` 指向**新的**目录，并在常规训练命令中指定对应的 `--split-csv`、`--tiles-npy` 和 `--stats-json`。若运行中断，已完成的输出不会自动删除；核对后可选择新的输出目录重做。数据准备会读取和打包全部 TIFF，耗时且需数 GB 磁盘空间；本仓库不附带原图、处理数据或预训练权重。完成后按下一节先跑轻量测试，再启动训练。
+
+## 快速运行
+
+以下命令在项目根目录执行，以已按上一节准备好的 `data/processed/` 图块与清单、已激活的环境为前提。若尚未执行 `pip install -e .`，先设置源码路径；已执行者可以跳过第一行。先做轻量检查：
+
+```powershell
+$env:PYTHONPATH = (Resolve-Path .\src).Path
+python -m unittest discover -s tests -v
+python -m leukocyte_analysis.train --smoke-test --batch-size 8 --init random
+```
+
+默认值现已对齐各自最近一次完成的配置：常规训练最多 45 轮，三折交叉验证每折最多 30 轮；两者均用 ImageNet 初始化、学习率 `0.0001`、翻转／光度／几何增强、Plateau、标签平滑 `0.05`、早停耐心值 15 和最小改善量 0。直接运行 `python -m leukocyte_analysis.train` 或 `python -m leukocyte_analysis.cross_validate` 即采用这些默认值。下面显式写出完整命令，方便留存配置；每次运行会新建结果目录：
+
+```powershell
+python -m leukocyte_analysis.train `
+  --init imagenet --lr 0.0001 --epochs 45 --batch-size 128 `
+  --augmentation flips_photometric_geometric --lr-scheduler plateau `
+  --early-stopping-patience 15 --early-stopping-min-delta 0 --label-smoothing 0.05
+
+python -m leukocyte_analysis.cross_validate `
+  --folds 3 --init imagenet --lr 0.0001 --epochs 30 --batch-size 128 `
+  --augmentation flips_photometric_geometric --lr-scheduler plateau `
+  --early-stopping-patience 15 --early-stopping-min-delta 0 --label-smoothing 0.05
+```
+
+轮数和学习率仍由用户选择，例如 `python -m leukocyte_analysis.train --epochs 60 --lr 0.00005`；其余参数不传时沿用上述默认值。`--epochs` 是最多训练轮数，早停仍可能提前结束。
+
+后文保留默认参数、历史实验对照、检查点评估和诊断工具的详细说明。
 
 ## 目录
 
@@ -10,6 +118,7 @@
 environment.yml                 Conda 环境
 pyproject.toml                  Python 包与命令行入口
 src/leukocyte_analysis/
+  prepare_data.py               原图到训练输入的准备入口
   data/                         数据读取、裁切、打包与审计代码
   models/                       模型结构代码
   training/                     数据加载器、Lightning 模块和实验配置
@@ -21,18 +130,18 @@ src/leukocyte_analysis/
   record_errors.py              从预测文件或检查点导出可定位的错分记录
   brightness_stress.py           已训练交叉验证权重的亮度敏感性诊断入口
   audit_brightness.py            原始图块的受试者／类别／批次亮度分布入口
+data/raw/                       可选的原图解压目录（Git 忽略）
 data/processed/                 已处理图块、清单、划分和训练集统计
 data/pretrained/                官方预训练权重缓存（初次下载后复用）
 reports/                        审计结果及预览图
 runs/                           每次完整训练生成的权重和指标（初始不存在）
-docs/                           对已完成实验的分析记录，不参与训练
-scripts/                        针对已完成实验的一次性核查脚本
+docs/                           实验记录及 README 用的少量静态图
 tests/                          不依赖完整数据集的自动化测试
 ```
 
-`src/leukocyte_analysis/data/` 存放**处理数据的代码**；项目根目录的 `data/` 存放**数据文件**。原始 TIFF 仍在项目外的 `../Stained_Montages/`，没有复制或修改。
+`src/leukocyte_analysis/data/` 存放**处理数据的代码**；项目根目录的 `data/` 存放**数据文件**。本机现有的原始 TIFF 仍在项目外的 `../Stained_Montages/`，没有复制或修改；其他读者可自行选择原图位置。
 
-`scripts/` 中的历史核查脚本绑定了特定运行目录，用于复核 [测试集异常记录](docs/bbbc045_test_audit.md) 及训练集错分聚集，不是通用训练入口；其输出保存在已忽略的 `runs/` 或 `reports/` 中。
+历史亮度诊断脚本依赖未发布的旧权重和数据，已从仓库移除；当时的数值与解释仍保留在[亮度实验汇总](docs/bbbc045_brightness_findings.md)。
 
 ## 当前数据
 
@@ -52,18 +161,18 @@ $env:PYTHONPATH = (Resolve-Path .\src).Path
 python -m leukocyte_analysis.train --smoke-test --batch-size 8 --init random
 ```
 
-确认无误后运行带光度增强、学习率调度与早停的下一次完整训练：
+确认无误后运行当前默认配置的完整训练（最多 45 轮，可用参数覆盖）：
 
 ```powershell
-python -m leukocyte_analysis.train --init imagenet --lr 0.0001 --epochs 30 --batch-size 128
+python -m leukocyte_analysis.train
 ```
 
-完整训练默认加载 torchvision 的 ImageNet-1K ResNet-18 权重，优先复用项目 `data/pretrained/` 中的缓存；缓存不存在时需要联网下载。若已设置 `TORCH_HOME`，则尊重该位置。单通道 3×3 首层按 Kaiming 方式初始化，四分类头使用 PyTorch 默认初始化，其他层保留预训练参数并全部参与微调。默认学习率为 `0.0001`，最多训练 30 轮，AdamW 的 `weight_decay=0.01`（不是 L1 正则化）。合并 B/T 后，类别权重由四类训练集数量重新计算，不沿用旧五分类权重。
+完整训练默认加载 torchvision 的 ImageNet-1K ResNet-18 权重，优先复用项目 `data/pretrained/` 中的缓存；缓存不存在时需要联网下载。若已设置 `TORCH_HOME`，则尊重该位置。单通道 3×3 首层按 Kaiming 方式初始化，四分类头使用 PyTorch 默认初始化，其他层保留预训练参数并全部参与微调。常规训练默认学习率为 `0.0001`，最多训练 45 轮，AdamW 的 `weight_decay=0.01`（不是 L1 正则化）。合并 B/T 后，类别权重由四类训练集数量重新计算，不沿用旧五分类权重。
 
-默认 `--augmentation flips_photometric_geometric`：只对训练图块做随机水平／垂直翻转、随机 0°／90°／180°／270° 旋转，并以 50% 概率再做 ±15° 旋转、水平／垂直各最多 4%（55 像素图块约 2 像素）的平移及 0.95–1.05 倍缩放；小角度变换采用双线性插值，不做弹性形变。此前的 torchvision `ColorJitter` 仍对原始灰度施加 0.8–1.25 倍亮度、0.9–1.1 倍对比度；另以各 20% 概率使用轻微 3×3 高斯模糊（σ=0.2–0.6 像素）和高斯噪声（原始像素尺度 σ=0.00002），再按训练集均值和标准差归一化。验证与测试集不增强。旧增强保持原样：`--augmentation flips_photometric` 仅翻转加亮度／对比度，`--augmentation flips` 仅翻转。新增强尚未验证能提高成绩，运行结果不能直接归因于学习率变化。默认 `--early-stopping-patience 15`：验证 macro-F1 连续 15 次检查没有至少提高 0.001 就停止，`0` 表示禁用；余弦方案至少训练 15 轮（若总轮数不足 15 则训练到上限）。早停不保证提高最佳分数。训练循环、Rich 终端进度条、日志和检查点由 Lightning 管理；macro-F1 与各类召回率由 TorchMetrics 计算。每次训练新建 `runs/resnet18_four_初始化方式_增强方式_调度方式_时间戳/`，其中 `csv/metrics.csv` 是逐轮指标，`tensorboard/` 是曲线日志，`checkpoints/best.ckpt` 是按验证集 macro-F1 选出的权重。`last.ckpt` 是最近一次实际保存的检查点，可能与 `best.ckpt` 相同。测试集不参与训练或选择权重。
+默认 `--augmentation flips_photometric_geometric`：只对训练图块做随机水平／垂直翻转、随机 0°／90°／180°／270° 旋转，并以 50% 概率再做 ±15° 旋转、水平／垂直各最多 4%（55 像素图块约 2 像素）的平移及 0.95–1.05 倍缩放；小角度变换采用双线性插值，不做弹性形变。此前的 torchvision `ColorJitter` 仍对原始灰度施加 0.8–1.25 倍亮度、0.9–1.1 倍对比度；另以各 20% 概率使用轻微 3×3 高斯模糊（σ=0.2–0.6 像素）和高斯噪声（原始像素尺度 σ=0.00002），再按训练集均值和标准差归一化。验证与测试集不增强。旧增强保持原样：`--augmentation flips_photometric` 仅翻转加亮度／对比度，`--augmentation flips` 仅翻转。该组合配置已有三折和原保留测试集结果，但同时改变了多项训练设置，不能将成绩单独归因于某一种增强、学习率调度或标签平滑。默认 `--early-stopping-patience 15` 与 `--early-stopping-min-delta 0`：验证 macro-F1 连续 15 次检查未创新高就停止；耐心值设为 `0` 可禁用早停。余弦方案至少训练 15 轮（若总轮数不足 15 则训练到上限）。早停不保证提高最佳分数。训练循环、Rich 终端进度条、日志和检查点由 Lightning 管理；macro-F1 与各类召回率由 TorchMetrics 计算。每次训练新建 `runs/resnet18_four_初始化方式_增强方式_调度方式_时间戳/`，其中 `csv/metrics.csv` 是逐轮指标，`tensorboard/` 是曲线日志，`checkpoints/best.ckpt` 是按验证集 macro-F1 选出的权重。`last.ckpt` 是最近一次实际保存的检查点，可能与 `best.ckpt` 相同。测试集不参与训练或选择权重。
 常规训练还会在该运行目录写入 `data_split.json`，记录所用清单、CRF101 合并分组规则、每组目录标识及 train/val/test 归属和图块数量；这只记录划分，不复制原始图像。
 
-默认 `--lr-scheduler plateau`：验证 macro-F1 停滞时降低 AdamW 学习率，`patience=3`、`cooldown=2`、每次乘以 0.5，最低为初始学习率的 1%；与早停 `patience=15` 搭配，给降学习率后的模型留出观察时间。Lightning 每轮记录实际学习率。`--lr-scheduler cosine` 仍可选择：前 2 轮线性预热，随后按轮次余弦下降到初始值的 1%；`--lr-scheduler none` 可运行固定学习率对照，**不会叠加两种调度器**。标签平滑默认关闭，可用 `--label-smoothing` 设置训练加权交叉熵的系数；验证指标和 `val_loss` 不作平滑。`train_loss` 与 `train_weighted_loss` 保留未平滑口径用于旧实验对照，新增 `train_objective_loss` 显示实际优化目标。此前 Plateau 与余弦三折的折外指标十分接近，余弦并未显示稳定优势；新默认配置的早停最小改善量为 0.001，与旧 Plateau 运行的 0 不同，因此新结果也不应视作那次实验的逐项复现。光度增强范围曾参考旧验证异常，因此同折比较属于探索性分析，不是全新独立测试。
+默认 `--lr-scheduler plateau`：验证 macro-F1 停滞时降低 AdamW 学习率，`patience=3`、`cooldown=2`、每次乘以 0.5，最低为初始学习率的 1%；与早停 `patience=15` 搭配，给降学习率后的模型留出观察时间。Lightning 每轮记录实际学习率。`--lr-scheduler cosine` 仍可选择：前 2 轮线性预热，随后按轮次余弦下降到初始值的 1%；`--lr-scheduler none` 可运行固定学习率对照，**不会叠加两种调度器**。标签平滑默认 `0.05`；可用 `--label-smoothing 0` 关闭，验证指标和 `val_loss` 不作平滑。`train_loss` 与 `train_weighted_loss` 保留未平滑口径用于旧实验对照，新增 `train_objective_loss` 显示实际优化目标。此前 Plateau 与余弦三折的折外指标十分接近，余弦并未显示稳定优势；当前命令行默认早停最小改善量为 0，与最近完成的组合配置一致。光度增强范围曾参考旧验证异常，因此同折比较属于探索性分析，不是全新独立测试。
 
 当前只提供四分类训练与评估入口；旧五分类权重即使存在，也不能直接用于四分类。早停主要减少最佳验证轮次之后的无效训练，并不保证提高最佳分数。亮度审计、增强对照与压力测试的结果和解释统一见[亮度实验汇总](docs/bbbc045_brightness_findings.md)；测试错分及标签来源核查见[测试与标签异常记录](docs/bbbc045_test_audit.md)。
 
@@ -91,10 +200,10 @@ tensorboard --logdir .\runs
 python -m leukocyte_analysis.cross_validate --smoke-test --init random --batch-size 8
 ```
 
-再运行按新 CRF101 同组规则分折的完整实验；每折最多 30 轮，耗时可能明显增加，不会由上述冒烟命令自动启动。命令显式列出关键选项以便复现本次配置：
+再运行按新 CRF101 同组规则分折的完整实验；每折默认最多 30 轮，耗时可能明显增加，不会由上述冒烟命令自动启动。若想复现最近完成的组合配置，命令如下；其他历史实验命令仍保留其当时的参数：
 
 ```powershell
-python -m leukocyte_analysis.cross_validate --folds 3 --init imagenet --lr 0.0001 --epochs 30 --batch-size 128 --augmentation flips_photometric_geometric --lr-scheduler plateau --early-stopping-patience 15
+python -m leukocyte_analysis.cross_validate --folds 3 --init imagenet --lr 0.0001 --epochs 30 --batch-size 128 --augmentation flips_photometric_geometric --lr-scheduler plateau --early-stopping-patience 15 --early-stopping-min-delta 0 --label-smoothing 0.05
 ```
 
 标签平滑三折实验使用已验证过的翻转＋亮度／对比度方案，不叠加本次第 1 折未带来收益的几何／模糊／噪声增强；`--early-stopping-min-delta 0` 与此前同分折 Plateau 基线保持一致。系数 0.05 是比白细胞染色 RGB 图研究中常见的 0.1 更保守的起点，**不是 BBBC045 上已验证的最优值**：
@@ -105,7 +214,7 @@ python -m leukocyte_analysis.cross_validate --folds 3 --init imagenet --lr 0.000
 
 不加 `--first-fold-only` 就会一次运行完整三折；`plan.json` 和检查点会保存平滑系数。比较时以三折折外准确率、macro-F1、单核细胞 precision／recall 和各受试者指标为主，不把训练损失变大或预测置信度变低本身当作退步。原测试受试者 CRF049、CRF066 仍不参与本次参数选择。
 
-若要在同一次新实验中同时启用统一 `0.05` 标签平滑与前述几何／模糊／噪声增强，使用以下完整三折命令；它会创建新的运行目录，不能在已开始的三折中途切换增强方式：
+最近完成的三折组合实验同时启用了统一 `0.05` 标签平滑与前述几何／模糊／噪声增强，命令如下；这也是当前三折入口的默认配置：
 
 ```powershell
 python -m leukocyte_analysis.cross_validate --folds 3 --init imagenet --lr 0.0001 --epochs 30 --batch-size 128 --augmentation flips_photometric_geometric --lr-scheduler plateau --early-stopping-patience 15 --early-stopping-min-delta 0 --label-smoothing 0.05
@@ -182,7 +291,7 @@ python -m leukocyte_analysis.record_errors --split test --predictions-csv "$run\
 
 记录程序拒绝覆盖已有目标文件；人工核查时不要根据测试集错分调整模型后再把同一测试集称为独立最终测试。
 
-可选：若希望不再设置 `PYTHONPATH`，在已激活环境中执行 `python -m pip install --no-deps --no-build-isolation -e .`，此后可使用 `leukocyte-train`、`leukocyte-cross-validate`、`leukocyte-evaluate`、`leukocyte-record-errors`、`leukocyte-brightness-stress` 和 `leukocyte-audit-brightness` 命令。
+按“从零准备环境和数据”中的 `pip install -e .` 安装后，不必设置 `PYTHONPATH`；也可使用 `leukocyte-prepare-data`、`leukocyte-train`、`leukocyte-cross-validate`、`leukocyte-evaluate`、`leukocyte-record-errors`、`leukocyte-brightness-stress` 和 `leukocyte-audit-brightness` 命令。若沿用旧环境而只需注册命令，可执行 `python -m pip install --no-deps --no-build-isolation -e .`。
 
 运行不依赖完整数据集的单元测试：
 

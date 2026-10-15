@@ -23,9 +23,10 @@ class TestTrainingConfiguration(unittest.TestCase):
         self.assertEqual(args.weight_decay, 0.01)
         self.assertEqual(args.augmentation, "flips_photometric_geometric")
         self.assertEqual(args.lr_scheduler, "plateau")
-        self.assertEqual(args.epochs, 30)
+        self.assertEqual(args.epochs, 45)
         self.assertEqual(args.early_stopping_patience, 15)
-        self.assertEqual(args.label_smoothing, 0.0)
+        self.assertEqual(args.early_stopping_min_delta, 0.0)
+        self.assertEqual(args.label_smoothing, 0.05)
         self.assertFalse(hasattr(args, "task"))
 
     def test_cross_validation_defaults_and_old_baseline_remain_selectable(self) -> None:
@@ -35,11 +36,24 @@ class TestTrainingConfiguration(unittest.TestCase):
         self.assertEqual((args.augmentation, args.lr_scheduler),
                          ("flips_photometric_geometric", "plateau"))
         self.assertEqual((args.epochs, args.early_stopping_patience), (30, 15))
-        self.assertEqual(args.label_smoothing, 0.0)
+        self.assertEqual(args.early_stopping_min_delta, 0.0)
+        self.assertEqual(args.label_smoothing, 0.05)
         with patch.object(sys, "argv", ["leukocyte-train", "--augmentation", "flips",
                                             "--lr-scheduler", "none"]):
             old = parse_args()
         self.assertEqual((old.augmentation, old.lr_scheduler), ("flips", "none"))
+
+    def test_latest_defaults_can_be_overridden(self) -> None:
+        """训练轮数、学习率和平滑系数仍由命令行显式选择。"""
+        for command, parse in (("leukocyte-train", parse_args),
+                               ("leukocyte-cross-validate", parse_cv_args)):
+            with self.subTest(command=command), patch.object(
+                sys, "argv", [command, "--epochs", "60", "--lr", "0.00005",
+                              "--label-smoothing", "0"],
+            ):
+                args = parse()
+            self.assertEqual((args.epochs, args.lr, args.label_smoothing),
+                             (60, 5e-5, 0.0))
 
     def test_first_fold_and_continue_options_are_exclusive(self) -> None:
         """首折试跑与接续已有运行不可在同一命令中混用。"""

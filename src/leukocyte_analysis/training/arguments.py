@@ -4,16 +4,18 @@ import argparse
 import math
 from pathlib import Path
 
-from .experiment import EARLY_STOP_MIN_DELTA
 from .loaders import AUGMENTATION_MODES
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
+DEFAULT_TRAIN_EPOCHS = 45
+DEFAULT_CV_EPOCHS = 30
 
 
-def add_training_arguments(parser: argparse.ArgumentParser) -> None:
-    """加入两种训练入口含义一致的超参数及数据路径。"""
-    parser.add_argument("--epochs", type=int, default=30)
+def add_training_arguments(parser: argparse.ArgumentParser, *,
+                           default_epochs: int = DEFAULT_CV_EPOCHS) -> None:
+    """加入共用超参数；常规训练和交叉验证可分别指定轮数上限。"""
+    parser.add_argument("--epochs", type=int, default=default_epochs)
     parser.add_argument("--batch-size", type=int, default=128)
     parser.add_argument("--lr", type=float, default=1e-4, help="AdamW 学习率；ImageNet 微调基线默认 0.0001")
     parser.add_argument("--lr-scheduler", choices=("none", "plateau", "cosine"), default="plateau",
@@ -28,9 +30,9 @@ def add_training_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--early-stopping-patience", type=int, default=15,
                         help="验证 macro-F1 连续多少轮未提高就停止；0 表示禁用")
     parser.add_argument("--early-stopping-min-delta", type=float,
-                        default=EARLY_STOP_MIN_DELTA)
-    parser.add_argument("--label-smoothing", type=float, default=0.0,
-                        help="训练加权交叉熵的标签平滑系数；0 表示关闭")
+                        default=0.0)
+    parser.add_argument("--label-smoothing", type=float, default=0.05,
+                        help="训练加权交叉熵的标签平滑系数；默认 0.05，0 表示关闭")
     parser.add_argument("--split-csv", type=Path,
                         default=PROJECT_ROOT / "data/processed/bbbc045_split.csv")
     parser.add_argument("--tiles-npy", type=Path,

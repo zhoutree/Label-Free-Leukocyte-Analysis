@@ -6,6 +6,7 @@ __pycache__/
 .pytest_cache/
 
 # 可由数据管线或训练重新生成的大文件及报告
+data/raw/
 data/processed/
 data/pretrained/
 reports/

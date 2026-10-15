@@ -1,18 +1,19 @@
 # Python 代码逐文件审查清单
 
-范围：`src/leukocyte_analysis/`、`tests/` 和 `scripts/` 现有 61 个 Python 源文件。以下保留逐文件勾选、复用审查和注释复核记录；`[x]` 表示已检查，不表示必须修改。
+范围：`src/leukocyte_analysis/` 和 `tests/` 现有 60 个 Python 源文件。以下保留逐文件勾选、复用审查和注释复核记录；`[x]` 表示已检查，不表示必须修改。历史 `scripts/` 目录已按用户要求移除。
 
-## `src/leukocyte_analysis/`（40）
+## `src/leukocyte_analysis/`（41）
 
 该部分以 `rg --files src/leukocyte_analysis -g '*.py'` 为准，逐文件检查职责、重复实现、依赖方向及必要注释。用户已有改动与实验产物不在此清单中。
 
-### 包根目录与命令入口（8）
+### 包根目录与命令入口（9）
 
 - [x] `__init__.py` — 空包入口，无逻辑。
 - [x] `audit_brightness.py` — 亮度审计命令入口，调用数据分析模块。
 - [x] `brightness_stress.py` — 亮度压力测试命令入口。
 - [x] `cross_validate.py` — 交叉验证参数与运行入口；与常规训练选项相近，但流程不同。
 - [x] `evaluate.py` — 保留测试集评估入口。
+- [x] `prepare_data.py` — 原图准备入口，仅编排现有数据模块并在开始前检查输出冲突。
 - [x] `record_errors.py` — 错分导出入口，复用通用推理和记录函数。
 - [x] `resume_cv.py` — 单折续训入口。
 - [x] `train.py` — 常规训练参数与组装入口，不实现模型训练细节。
@@ -68,7 +69,7 @@
 - 已有的职责拆分：`training/cv_plan.py`、`training/cv_reports.py` 分担交叉验证计划与报告；`evaluation/inference.py` 从测试报告中抽出通用推理。它们仍是本清单审查的对象，不把“已拆分”当成未检查的理由。
 - 本轮未发现需要再拆出独立文件的混合职责，也未发现第二套模型训练或分类指标实现。`training/loaders.py` 的增强构建是可进一步独立化的候选，但目前规模较小且只由一个加载器使用；贸然拆文件会增加调用层级而不减少行为复杂度。
 - 首次审查给 `DonorFold` 补了说明受试者分组约束的类文档字符串；后续按同一清单做了完整注释复核，见下节。
-- 该次 `src/` 审查没有改动训练、推理和评估行为；当时未审查 `scripts/`、`tests/`、文档和数据产物。`scripts/`、`tests/` 的后续审查记录见下文。
+- 该次 `src/` 审查没有改动训练、推理和评估行为；当时尚未审查测试、历史脚本、文档和数据产物。测试文件的后续审查记录见下文；历史脚本现已移除。
 
 ### 注释复核（2026-10-15）
 
@@ -79,14 +80,9 @@
 - 在亮度代理计算处说明外缘像素并非保证纯背景；核对文案不超过代码实际验证范围。
 - 当时的 AST 复查结果：40/40 个模块、101/101 个类／函数定义有文档字符串；行为逻辑未因注释调整而改变。随后新增共用参数模块、移除了旧预览模块。
 
-## `tests/` 与 `scripts/`（21）
+## `tests/`（19）
 
-范围：以 `rg --files tests scripts -g '*.py'` 为准，现有 21 个 Python 源文件（`scripts/` 2 个、`tests/` 19 个）。`__pycache__/` 内的 `.pyc` 是运行生成的缓存，不计入源文件清单。逐个检查职责、重复测试或实现、可复用性、必要注释及文件是否应合并/拆分。`[x]` 表示已检查，不代表必须修改。
-
-### `scripts/`（2）
-
-- [x] `scripts/diagnose_crf022_batch_shift.py` — 固定折、固定受试者与复现数字的亮度诊断；与下一脚本的推理循环局部相似，但实验对照不同。
-- [x] `scripts/diagnose_crf049_monocyte_shift.py` — 固定单次训练权重和测试集对照数字；保留独立脚本便于复现历史结果。
+范围：以 `rg --files tests -g '*.py'` 为准，现有 19 个 Python 源文件。`__pycache__/` 内的 `.pyc` 是运行生成的缓存，不计入源文件清单。逐个检查职责、重复测试或实现、可复用性、必要注释及文件是否应合并/拆分。`[x]` 表示已检查，不代表必须修改。
 
 ### `tests/`（19）
 
@@ -112,20 +108,15 @@
 
 ### 审查结论与变更
 
-此前已逐个审查相关源文件；按用户要求删除三个一次性脚本后，当前清单列出剩余的 21 个文件。
+此前已逐个审查相关源文件；按用户要求先后移除六份历史／展示脚本，当前清单只列出保留的 19 个测试文件。README 的静态图和历史实验结论仍保留。
 
 - 没有值得合并的整份测试文件：名称相近的 `test_cross_validation.py`／`test_cv_resume.py` 以及 `test_error_logging.py`／`test_validation_error_callback.py` 分别覆盖不同层次或操作。
 - 没有必须拆开的长测试文件：`test_cv_resume.py` 和 `test_intensity_audit.py` 的长度来自单一完整场景所需的合成数据，拆到共享夹具会让场景更难核对。`test_training.py` 现在只管 CLI 配置，不再是以前混合模型、数据、增强和进度显示的大文件。
-- 小重复保留：两份历史亮度脚本各有约一段原始图块推理与计数，绑定不同检查点、样本数和校验常量；强行合并会增加历史诊断的隐含参数。`test_error_logging.py` 和 `test_evaluation.py` 各有一个仅数行的 `PixelClassifier` 合成替身，放到共享夹具的收益低。
+- 小重复保留：`test_error_logging.py` 和 `test_evaluation.py` 各有一个仅数行的 `PixelClassifier` 合成替身，放到共享夹具的收益低。
 
 ### 第二轮：已有模块与第三方库复用
 
 依照上方清单逐个对照。这里的“保留”表示没有发现值得新增依赖或抽象层的重复，不表示代码永远不能改。
-
-#### `scripts/`
-
-- `diagnose_crf022_batch_shift.py`：已复用模型构建和检查点加载。原始数组的多档扰动推理不适合通用 `predict(LeukocyteDataset)` 接口；与 CRF049 脚本有小段重复，可在以后新增同类诊断时再抽共享函数。
-- `diagnose_crf049_monocyte_shift.py`：与上一项相同；保留固定样本数和基线复现检查，避免历史报告因通用化而难追溯。
 
 #### `tests/`
 

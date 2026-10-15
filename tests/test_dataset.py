@@ -7,10 +7,12 @@ import unittest
 from pathlib import Path
 
 import numpy as np
+import tifffile
 
 from leukocyte_analysis.data.bbbc045_config import CLASS_NAMES, model_label
 from leukocyte_analysis.data.dataset import LeukocyteDataset
 from leukocyte_analysis.data.split import split_for_donor, summarize_split_groups
+from leukocyte_analysis.prepare_data import prepare_data
 
 
 class TestDataRules(unittest.TestCase):
@@ -93,3 +95,38 @@ class TestLeukocyteDataset(unittest.TestCase):
             self.assertEqual(float(val[0][0].mean()), 0.0)
             self.assertEqual(tuple(train[0][0].shape), (1, 55, 55))
             del train, val
+
+
+class TestDataPreparation(unittest.TestCase):
+    """用少量合成 TIFF 核对准备入口的顺序、输出和防覆盖规则。"""
+
+    def test_prepare_data_uses_existing_pipeline(self) -> None:
+        """原始标签与受试者划分保留，统计量仅来自训练图块。"""
+        with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent) as temporary:
+            root = Path(temporary)
+            data_root, output_dir = root / "raw", root / "processed"
+            train_tile = np.arange(55 * 55, dtype=np.float32).reshape(55, 55) / 100000
+            for donor, label, tile in (
+                ("CRF022", "T", train_tile),
+                ("CRF034", "B", np.full((55, 55), 2, dtype=np.float32)),
+                ("CRF049", "monocyte", np.full((55, 55), 3, dtype=np.float32)),
+            ):
+                source = data_root / donor / label / "batch1" / "ch5_1.tif"
+                source.parent.mkdir(parents=True)
+                tifffile.imwrite(source, tile)
+
+            prepare_data(data_root, output_dir)
+            with (output_dir / "bbbc045_split.csv").open(newline="", encoding="utf-8") as file:
+                records = list(csv.DictReader(file))
+            self.assertEqual([(row["label"], row["split"]) for row in records],
+                             [("T", "train"), ("B", "val"), ("monocyte", "test")])
+            tiles = np.load(output_dir / "bbbc045_tiles.npy", mmap_mode="r")
+            self.assertEqual(tiles.shape, (3, 55, 55))
+            np.testing.assert_array_equal(tiles[0], train_tile)
+            stats = json.loads((output_dir / "bbbc045_train_stats.json").read_text("utf-8"))
+            self.assertEqual(stats["train_tiles"], 1)
+            self.assertAlmostEqual(stats["mean"], float(train_tile.mean()), places=6)
+            del tiles
+
+            with self.assertRaises(FileExistsError):
+                prepare_data(data_root, output_dir)

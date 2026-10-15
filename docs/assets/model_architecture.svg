@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="920" height="300" viewBox="0 0 920 300" role="img" aria-labelledby="title desc">
+  <title id="title">适配 55×55 单通道明场图块的 ResNet-18 四分类结构</title>
+  <desc id="desc">训练侧归一化后的单通道图块经过三乘三输入卷积、去除初始最大池化的 ResNet-18 残差层、全局平均池化和四分类全连接层。</desc>
+  <defs>
+    <marker id="arrow" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto">
+      <path d="M0 0 L9 4.5 L0 9 Z" fill="#4474a7"/>
+    </marker>
+  </defs>
+  <rect x="1" y="1" width="918" height="298" rx="18" fill="#ffffff" stroke="#dce5ee" stroke-width="2"/>
+  <g font-family="Arial, 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" fill="#193047">
+    <text x="30" y="42" font-size="24" font-weight="700">模型结构 · ResNet-18</text>
+    <text x="30" y="66" font-size="14" fill="#60758a">ImageNet-1K 预训练残差主体；输入层和分类头适配 BBBC045 后重新初始化</text>
+
+    <rect x="27" y="103" width="132" height="96" rx="12" fill="#edf6fd" stroke="#9fc0dc" stroke-width="2"/>
+    <text x="93" y="143" text-anchor="middle" font-size="19" font-weight="700">55×55×1</text>
+    <text x="93" y="171" text-anchor="middle" font-size="14" fill="#526c82">明场图块</text>
+
+    <rect x="188" y="103" width="158" height="96" rx="12" fill="#edf6fd" stroke="#9fc0dc" stroke-width="2"/>
+    <text x="267" y="137" text-anchor="middle" font-size="18" font-weight="700">输入卷积</text>
+    <text x="267" y="162" text-anchor="middle" font-size="14" fill="#526c82">1 通道 · 3×3</text>
+    <text x="267" y="183" text-anchor="middle" font-size="14" fill="#526c82">stride 1</text>
+
+    <rect x="375" y="103" width="203" height="96" rx="12" fill="#eef8f7" stroke="#84c7bd" stroke-width="2"/>
+    <text x="477" y="137" text-anchor="middle" font-size="18" font-weight="700">残差主体</text>
+    <text x="477" y="162" text-anchor="middle" font-size="14" fill="#486e69">去除初始 max-pool</text>
+    <text x="477" y="183" text-anchor="middle" font-size="14" fill="#486e69">layer 1–4</text>
+
+    <rect x="607" y="103" width="114" height="96" rx="12" fill="#eef8f7" stroke="#84c7bd" stroke-width="2"/>
+    <text x="664" y="144" text-anchor="middle" font-size="18" font-weight="700">全局池化</text>
+    <text x="664" y="171" text-anchor="middle" font-size="14" fill="#486e69">512 维</text>
+
+    <rect x="750" y="103" width="143" height="96" rx="12" fill="#fff6ec" stroke="#efbb80" stroke-width="2"/>
+    <text x="822" y="137" text-anchor="middle" font-size="18" font-weight="700">分类头</text>
+    <text x="822" y="162" text-anchor="middle" font-size="14" fill="#806347">Linear 512 → 4</text>
+    <text x="822" y="183" text-anchor="middle" font-size="14" fill="#806347">四类 logits</text>
+
+    <path d="M161 151 H180 M348 151 H367 M580 151 H599 M723 151 H742" fill="none" stroke="#4474a7" stroke-width="2.5" marker-end="url(#arrow)"/>
+    <rect x="28" y="225" width="864" height="48" rx="10" fill="#f5f7fa"/>
+    <text x="460" y="254" text-anchor="middle" font-size="15" fill="#516679">仅训练期随机增强；训练、验证和测试统一使用训练侧均值与标准差归一化</text>
+  </g>
+</svg>
