@@ -5,7 +5,11 @@ from torchvision.models import ResNet18_Weights, resnet18
 
 
 def build_resnet18(num_classes: int, *, initialization: str = "imagenet") -> nn.Module:
-    """构建小图分类模型；默认微调 ImageNet 预训练主干。"""
+    """返回适配 55×55 单通道图块的 ResNet-18 分类器。
+
+    ``imagenet`` 仅保留可兼容的预训练主体；新的单通道首层和
+    ``num_classes`` 输出头重新初始化。``random`` 则从头初始化全网。
+    """
     if num_classes < 2:
         raise ValueError("类别数量至少为 2")
     if initialization not in {"imagenet", "random"}:

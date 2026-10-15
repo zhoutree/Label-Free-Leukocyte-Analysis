@@ -5,12 +5,15 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from leukocyte_analysis.data.bbbc045_config import CLASS_NAMES
 from leukocyte_analysis.evaluation.brightness import (
-    _measure, _save_plots, _validate_plans, compare_brightness,
+    _measure, _validate_plans, compare_brightness,
 )
+from leukocyte_analysis.evaluation.plots import save_brightness_comparison
 
 
 def plan(augmentation: str) -> dict:
+    """构造两折且排除原测试受试者的最小亮度实验计划。"""
     return {
         "method": "StratifiedGroupKFold", "source_manifest": "split.csv",
         "packed_tiles": "tiles.npy", "excluded_donors": ["CRF049", "CRF066"],
@@ -23,7 +26,10 @@ def plan(augmentation: str) -> dict:
 
 
 class TestBrightnessStress(unittest.TestCase):
+    """限制亮度比较只能在同一批折外样本上进行。"""
+
     def test_only_matched_validation_folds_are_accepted(self) -> None:
+        """拒绝受试者分折或其他训练超参数不一致的两组运行。"""
         first, second = plan("flips"), plan("flips_photometric")
         _validate_plans(first, second)
         changed = copy.deepcopy(second)
@@ -36,6 +42,7 @@ class TestBrightnessStress(unittest.TestCase):
             _validate_plans(first, changed)
 
     def test_metrics_and_plots_use_existing_prediction_format(self) -> None:
+        """总体、逐类和逐受试者统计可从同一预测格式生成。"""
         predictions = [
             {"packed_index": 0, "donor": "A", "true_index": 0, "predicted_index": 0},
             {"packed_index": 1, "donor": "A", "true_index": 1, "predicted_index": 0},
@@ -49,11 +56,12 @@ class TestBrightnessStress(unittest.TestCase):
         self.assertEqual({row["donor"] for row in donors}, {"A", "B"})
         with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent) as temporary:
             folder = Path(temporary)
-            _save_plots([overall], classes, folder)
+            save_brightness_comparison([overall], classes, folder, CLASS_NAMES)
             self.assertGreater((folder / "overall.png").stat().st_size, 0)
             self.assertGreater((folder / "per_class_recall.png").stat().st_size, 0)
 
     def test_bad_factors_do_not_create_report(self) -> None:
+        """缺少原亮度对照时应在创建报告目录前失败。"""
         with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent) as temporary:
             output = Path(temporary) / "report"
             with self.assertRaisesRegex(ValueError, "1.0"):

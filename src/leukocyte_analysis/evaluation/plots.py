@@ -1,4 +1,4 @@
-"""使用 Matplotlib 绘制混淆矩阵和高置信度错分样本。"""
+"""使用 Matplotlib 生成评估与亮度诊断图。"""
 
 from pathlib import Path
 
@@ -8,6 +8,40 @@ matplotlib.use("Agg")  # 命令行和无显示器环境也可以保存图片。
 import matplotlib.pyplot as plt
 import numpy as np
 from sklearn.metrics import ConfusionMatrixDisplay
+
+
+def save_brightness_comparison(overall: list[dict], classes: list[dict],
+                               output_dir: Path, class_names: tuple[str, ...]) -> None:
+    """按相同亮度倍率绘制两种训练方式的总体指标与逐类召回率。"""
+    runs = list(dict.fromkeys(row["run"] for row in overall))
+    fig, axes = plt.subplots(1, 2, figsize=(10, 4), constrained_layout=True)
+    for run in runs:
+        rows = sorted((row for row in overall if row["run"] == run),
+                      key=lambda row: row["brightness_factor"])
+        for axis, metric in zip(axes, ("accuracy", "macro_f1")):
+            axis.plot([row["brightness_factor"] for row in rows],
+                      [row[metric] for row in rows], marker="o", label=run)
+    for axis, metric in zip(axes, ("accuracy", "macro_f1")):
+        axis.set(xlabel="Brightness multiplier", ylabel=metric, ylim=(0, 1.02))
+        axis.grid(alpha=0.3)
+    axes[0].legend()
+    fig.savefig(output_dir / "overall.png", dpi=160)
+    plt.close(fig)
+
+    fig, axes = plt.subplots(2, 2, figsize=(10, 8), constrained_layout=True)
+    for axis, name in zip(axes.flat, class_names):
+        for run in runs:
+            rows = sorted((row for row in classes if row["run"] == run
+                           and row["class"] == name),
+                          key=lambda row: row["brightness_factor"])
+            axis.plot([row["brightness_factor"] for row in rows],
+                      [row["recall"] for row in rows], marker="o", label=run)
+        axis.set(title=name, xlabel="Brightness multiplier", ylabel="Recall", ylim=(0, 1.02))
+        axis.grid(alpha=0.3)
+    axes.flat[0].legend()
+    fig.savefig(output_dir / "per_class_recall.png", dpi=160)
+    plt.close(fig)
+
 
 def save_confusion_matrices(y_true: list[int], y_pred: list[int], output_dir: Path,
                             class_names: tuple[str, ...]) -> None:

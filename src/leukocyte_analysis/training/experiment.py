@@ -38,7 +38,12 @@ def run_training(
     early_stopping_min_delta: float = EARLY_STOP_MIN_DELTA,
     label_smoothing: float = 0.0,
 ) -> None:
-    """按验证 macro-F1 选最佳权重；可提前停止，冒烟模式不保存文件。"""
+    """运行 Lightning 训练并按验证 macro-F1 保存最佳检查点。
+
+    ``smoke_test`` 只执行两批且不落盘；正常运行保存 CSV、TensorBoard
+    和逐轮错分。续训从 ``resume_checkpoint`` 恢复优化器状态，并写入
+    新的 ``output_dir``；``schedule_epochs`` 保留原学习率日程终点。
+    """
     if early_stopping_patience < 0:
         raise ValueError("early_stopping_patience 不得小于 0")
     if early_stopping_min_delta < 0:

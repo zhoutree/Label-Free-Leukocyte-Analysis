@@ -5,7 +5,10 @@ from scipy.ndimage import gaussian_filter, laplace
 
 
 def focus_proxy(tile: np.ndarray) -> float:
-    """用平滑后拉普拉斯响应的方差衡量中央区域高频细节。"""
+    """返回中央区域平滑后拉普拉斯响应的方差。
+
+    低分只提示缺少高频细节；该代理值不能单独判定模糊或错标。
+    """
     if tile.ndim != 2 or min(tile.shape) < 10 or not np.isfinite(tile).all():
         raise ValueError("清晰度代理指标需要有限像素的二维图块")
 

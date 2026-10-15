@@ -9,7 +9,7 @@ import torch
 from .data.bbbc045_config import CLASS_NAMES
 from .data.dataset import LeukocyteDataset
 from .evaluation.error_records import ERROR_FIELDS, misclassified_rows, write_csv
-from .evaluation.runner import check_checkpoint_head, load_classifier, predict
+from .evaluation.inference import check_checkpoint_head, load_classifier, predict
 from .models.resnet import build_resnet18
 
 

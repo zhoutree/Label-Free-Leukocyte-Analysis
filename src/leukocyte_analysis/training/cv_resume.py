@@ -1,6 +1,5 @@
 """只延长一个交叉验证折，并复用其余折的原始预测。"""
 
-import csv
 import json
 import shutil
 from pathlib import Path
@@ -11,21 +10,21 @@ import torch
 from ..data.bbbc045_config import CLASS_NAMES, TEST_DONORS
 from ..data.cv_split import build_donor_folds
 from ..data.split import read_manifest
-from ..evaluation.runner import load_classifier, predict
+from ..evaluation.inference import load_classifier, predict
 from ..models.resnet import build_resnet18
-from .cross_validation import _metrics, _write_predictions, summarize_predictions
+from .cv_reports import fold_metrics, read_predictions, summarize_predictions, write_predictions
 from .experiment import run_training
 from .loaders import make_loaders
 
 
-def _read_predictions(path: Path) -> list[dict]:
-    with path.open(newline="", encoding="utf-8") as handle:
-        return list(csv.DictReader(handle))
-
-
 def resume_cv_fold(source_dir: Path, output_dir: Path, *, fold_number: int,
                    epochs: int) -> dict:
-    """从该折 last.ckpt 续训；旧运行保持只读，新目录保存对照与汇总。"""
+    """从指定折的 ``last.ckpt`` 续训，并与原最佳权重比较。
+
+    原运行保持只读；新目录保存续训日志及选择结果。只有当续训后的
+    macro-F1 高于原结果时才替换该折预测，其他折始终复用原预测。
+    ``epochs`` 是续训后的总轮数上限，而非额外轮数。
+    """
     source_dir = source_dir.resolve()
     if output_dir.exists():
         raise FileExistsError(f"续训结果目录已存在：{output_dir}")
@@ -93,7 +92,7 @@ def resume_cv_fold(source_dir: Path, output_dir: Path, *, fold_number: int,
         fold_dir / "data" / "train_stats.json", settings["batch_size"],
         plan["seed"], device, settings["augmentation"],
     )
-    # 权重由检查点完整恢复；无需再次下载 ImageNet 初始化权重。
+    # 权重和优化器由检查点恢复；调度周期沿用原计划，避免续训时重启学习率曲线。
     run_training(
         build_resnet18(len(CLASS_NAMES), initialization="random"),
         train_loader, val_loader, weights, device, epochs, new_training_dir,
@@ -106,15 +105,15 @@ def resume_cv_fold(source_dir: Path, output_dir: Path, *, fold_number: int,
         label_smoothing=settings.get("label_smoothing", 0.0),
     )
 
-    original_rows = _read_predictions(fold_dir / "validation_predictions.csv")
-    original_metrics = _metrics(original_rows)
+    original_rows = read_predictions(fold_dir / "validation_predictions.csv")
+    original_metrics = fold_metrics(original_rows)
     new_checkpoint = new_training_dir / "checkpoints" / "best.ckpt"
     if new_checkpoint.is_file():
         model = load_classifier(
             new_checkpoint, build_resnet18(len(CLASS_NAMES), initialization="random")
         )
         new_rows = predict(model, val_loader.dataset, settings["batch_size"], device)
-        new_metrics = _metrics(new_rows)
+        new_metrics = fold_metrics(new_rows)
     else:
         new_rows, new_metrics = [], None
 
@@ -122,13 +121,13 @@ def resume_cv_fold(source_dir: Path, output_dir: Path, *, fold_number: int,
     selected_rows = new_rows if improved else original_rows
     selected_checkpoint = new_checkpoint if improved else old_checkpoint
     fold_output = output_dir / f"fold_{fold_number:02d}" / "validation_predictions.csv"
-    _write_predictions(fold_output, selected_rows)
+    write_predictions(fold_output, selected_rows)
 
     results = []
     all_predictions = []
     for item in source["fold_results"]:
         number = item["fold"]
-        rows = (selected_rows if number == fold_number else _read_predictions(
+        rows = (selected_rows if number == fold_number else read_predictions(
             source_dir / f"fold_{number:02d}" / "validation_predictions.csv"
         ))
         expected_donors = next(set(part["val_donors"]) for part in plan["folds"]
@@ -136,7 +135,7 @@ def resume_cv_fold(source_dir: Path, output_dir: Path, *, fold_number: int,
         if {row["donor"] for row in rows} != expected_donors:
             raise ValueError(f"第 {number} 折的预测受试者与计划不一致")
         results.append({**item, "checkpoint": str(selected_checkpoint),
-                        "metrics": _metrics(rows)} if number == fold_number else item)
+                        "metrics": fold_metrics(rows)} if number == fold_number else item)
         all_predictions.extend(rows)
 
     summary = summarize_predictions(plan, results, all_predictions, records)

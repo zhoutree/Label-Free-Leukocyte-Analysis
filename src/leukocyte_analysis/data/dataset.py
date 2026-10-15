@@ -25,6 +25,11 @@ class LeukocyteDataset(Dataset):
         include_index: bool = False,
         raw_transform: Callable[[torch.Tensor], torch.Tensor] | None = None,
     ) -> None:
+        """按 CSV 行号建立图块索引，并读取训练集统计量。
+
+        ``raw_transform`` 在标准化前作用于原始灰度，``transform`` 在标准化后
+        作用于模型输入；``include_index`` 供验证错分追溯原始图块。
+        """
         if split not in {"train", "val", "test"}:
             raise ValueError(f"未知数据组：{split}")
 
@@ -65,6 +70,7 @@ class LeukocyteDataset(Dataset):
             raise ValueError("标准差无效或当前数据组没有样本")
 
     def __len__(self) -> int:
+        """返回当前数据划分中的图块数。"""
         return len(self.samples)
 
     def __getstate__(self) -> dict:
@@ -74,6 +80,7 @@ class LeukocyteDataset(Dataset):
         return state
 
     def _get_tiles(self) -> np.ndarray:
+        """在当前进程首次取样时打开只读图块映射。"""
         if self._tiles is None:
             self._tiles = np.load(
                 self.tiles_npy,
@@ -83,6 +90,7 @@ class LeukocyteDataset(Dataset):
         return self._tiles
 
     def __getitem__(self, index: int) -> tuple[torch.Tensor, int] | tuple[torch.Tensor, int, int]:
+        """读取单通道图块和四分类标签，必要时附带原清单索引。"""
         packed_index, label, _donor = self.samples[index]
         tile = self._get_tiles()[packed_index]
 

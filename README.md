@@ -2,6 +2,8 @@
 
 使用 BBBC045 的明场图像训练四分类模型：淋巴细胞（B＋T）、嗜酸性粒细胞、单核细胞、中性粒细胞。模型为适配 55×55 单通道图块的 ResNet-18；训练、验证和测试按受试者分开，完整训练默认从 ImageNet-1K 预训练权重微调。这四类不构成完整的临床血常规分类：数据集中未单列嗜碱性粒细胞等群体。
 
+新对话可先看[实验索引](docs/experiment_index.md)了解当前结果与证据入口；协作约定见 [AGENTS.md](AGENTS.md)。
+
 ## 目录
 
 ```text
@@ -102,6 +104,14 @@ python -m leukocyte_analysis.cross_validate --folds 3 --init imagenet --lr 0.000
 ```
 
 不加 `--first-fold-only` 就会一次运行完整三折；`plan.json` 和检查点会保存平滑系数。比较时以三折折外准确率、macro-F1、单核细胞 precision／recall 和各受试者指标为主，不把训练损失变大或预测置信度变低本身当作退步。原测试受试者 CRF049、CRF066 仍不参与本次参数选择。
+
+若要在同一次新实验中同时启用统一 `0.05` 标签平滑与前述几何／模糊／噪声增强，使用以下完整三折命令；它会创建新的运行目录，不能在已开始的三折中途切换增强方式：
+
+```powershell
+python -m leukocyte_analysis.cross_validate --folds 3 --init imagenet --lr 0.0001 --epochs 30 --batch-size 128 --augmentation flips_photometric_geometric --lr-scheduler plateau --early-stopping-patience 15 --early-stopping-min-delta 0 --label-smoothing 0.05
+```
+
+这同时改变了增强和平滑两个因素，适合检验组合方案的总效果，但无法单独归因于其中一项。
 
 若想先完整评估第 1 折，再决定是否训练剩余两折，在同一命令末尾加 `--first-fold-only`。完成后会输出第 1 折的准确率、macro-F1 与结果目录；这不是三折折外成绩。确定继续时，用它打印的目录运行 `python -m leukocyte_analysis.cross_validate --continue-run "结果目录"`：程序按保存的 `plan.json` 复用同一划分和训练配置，只训练第 2、3 折，最后生成完整 `summary.json`。不要改动第一折的目录或把 `--smoke-test` 当作完整训练；若某折训练中途被打断，程序不会覆盖该折已有文件。
 

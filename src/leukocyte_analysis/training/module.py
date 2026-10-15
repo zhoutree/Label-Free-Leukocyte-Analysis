@@ -34,6 +34,11 @@ class LeukocyteClassifier(L.LightningModule):
         schedule_epochs: int = 30,
         label_smoothing: float = 0.0,
     ) -> None:
+        """配置四分类损失、整轮指标及可从检查点恢复的调度参数。
+
+        ``schedule_epochs`` 是余弦日程的原计划终点；续训时可增加最大轮数，
+        但不据此重新拉长已经保存的学习率曲线。
+        """
         super().__init__()
         if len(CLASS_NAMES) != len(class_weights):
             raise ValueError("类别名称数量与类别权重数量不一致")
@@ -126,7 +131,7 @@ class LeukocyteClassifier(L.LightningModule):
         self.val_recall.reset()
 
     def configure_optimizers(self) -> torch.optim.Optimizer | dict:
-        """交由 Lightning 按轮次推进学习率；旧实验仍可选 plateau。"""
+        """由 Lightning 按轮次推进调度；plateau 监控验证 macro-F1。"""
         optimizer = torch.optim.AdamW(self.backbone.parameters(), lr=self.learning_rate,
                                       weight_decay=self.weight_decay)
         if self.lr_scheduler == "none":

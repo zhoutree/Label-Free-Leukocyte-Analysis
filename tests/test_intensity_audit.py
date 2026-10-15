@@ -11,7 +11,10 @@ from leukocyte_analysis.data.intensity_audit import audit_intensity
 
 
 class TestIntensityAudit(unittest.TestCase):
+    """用可控灰度图块核对批次差异和测试集留出规则。"""
+
     def test_batch_ratios_and_test_donor_exclusion(self) -> None:
+        """批次亮度比值可复算，默认报告不读取原测试受试者。"""
         with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent) as temporary:
             root = Path(temporary)
             manifest = root / "split.csv"

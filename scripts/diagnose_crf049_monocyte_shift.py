@@ -86,6 +86,7 @@ def variants(raw: np.ndarray, reference_mean: float, reference_std: float) -> di
 
 
 def main() -> None:
+    """固定原测试权重与校验数字，比较各批单核图块的亮度扰动。"""
     if REPORT.exists():
         raise FileExistsError(f"为避免覆盖先前诊断，报告已存在：{REPORT}")
     selected = select_indices()

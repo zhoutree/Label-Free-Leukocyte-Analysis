@@ -10,7 +10,11 @@ import numpy as np
 def write_train_stats(
     split_csv: Path, tiles_npy: Path, output_json: Path
 ) -> dict:
-    """分批计算训练集像素均值、标准差，并保存为 JSON。"""
+    """仅用 ``split=train`` 的原始像素分批计算全局统计量。
+
+    返回并写出图块数、像素数、均值、总体标准差和极值；验证／测试
+    图块不参与统计，供三组数据复用同一尺度。
+    """
     with split_csv.open("r", newline="", encoding="utf-8") as csv_file:
         records = list(csv.DictReader(csv_file))
 

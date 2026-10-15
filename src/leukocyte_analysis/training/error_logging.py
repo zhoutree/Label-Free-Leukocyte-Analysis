@@ -18,6 +18,7 @@ class ValidationErrorLogger(L.Callback):
     """仅记录验证集；不参与损失、模型选择或反向传播。"""
 
     def __init__(self, dataset, output_dir: Path) -> None:
+        """绑定带原索引的数据集，并从已有逐轮 CSV 恢复续训历史。"""
         super().__init__()
         if not dataset.include_index:
             raise ValueError("验证集必须返回 packed_index")
@@ -41,11 +42,13 @@ class ValidationErrorLogger(L.Callback):
                 entry["predictions"][row["predicted_label"]] += 1
 
     def on_validation_epoch_start(self, trainer, pl_module) -> None:
+        """清空本轮暂存的错分，避免与上一轮混计。"""
         self._current_errors = []
 
     def on_validation_batch_end(
         self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0
     ) -> None:
+        """收集模型返回的少量错分元数据；跳过 Lightning 预检。"""
         if trainer.sanity_checking or outputs is None:
             return
         fields = ("packed_index", "true_index", "predicted_index", "confidence")
@@ -56,6 +59,7 @@ class ValidationErrorLogger(L.Callback):
         ))
 
     def on_validation_epoch_end(self, trainer, pl_module) -> None:
+        """原子写入本轮错分，并更新跨轮累计频率表。"""
         if trainer.sanity_checking:
             return
         epoch = trainer.current_epoch  # Lightning 使用从 0 开始的轮号。

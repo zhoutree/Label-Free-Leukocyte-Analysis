@@ -11,6 +11,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
 def main() -> None:
+    """解析单折续训参数，并打印续训后选用的检查点结果。"""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source-run", type=Path, required=True)
     parser.add_argument("--fold", type=int, required=True)

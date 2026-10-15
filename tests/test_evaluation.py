@@ -19,6 +19,7 @@ class SyntheticCells:
     """模拟顺序数据集与清单索引，便于测试报告生成。"""
 
     def __init__(self, include_index: bool = False) -> None:
+        """准备四类各两张图，其中一张单核图会被确定性错分。"""
         self.include_index = include_index
         self.class_names = CLASS_NAMES
         self.labels = [0, 1, 2, 3, 0, 1, 2, 3]
@@ -37,13 +38,16 @@ class SyntheticCells:
         }
 
     def __len__(self) -> int:
+        """返回合成图块总数。"""
         return len(self.labels)
 
     def __getitem__(self, index: int) -> tuple:
+        """按需附带清单索引，模拟验证数据集的两种批次格式。"""
         sample = (torch.from_numpy(self.tiles[index][None]), self.labels[index])
         return (*sample, index) if self.include_index else sample
 
     def _get_tiles(self) -> np.ndarray:
+        """提供报告绘图使用的未标准化图块。"""
         return self.tiles
 
 
@@ -51,26 +55,32 @@ class PixelClassifier(nn.Module):
     """用首个像素编码类别；第 2 个样本必定错分。"""
 
     def forward(self, images: torch.Tensor) -> torch.Tensor:
+        """将首像素转成确定性的四类 logits。"""
         labels = images[:, 0, 0, 0].long()
         return torch.nn.functional.one_hot(labels, num_classes=4).float() * 10
 
 
 class TestEvaluation(unittest.TestCase):
+    """验证四分类检查点、索引追溯和报告原子发布。"""
+
     def test_old_five_class_checkpoint_is_rejected(self) -> None:
+        """拒绝旧五分类权重以防输出列含义错配。"""
         # 用合成的五输出层验证防误用逻辑，不依赖历史权重文件。
         saved = {"state_dict": {"backbone.fc.weight": torch.zeros(5, 512)},
                  "hyper_parameters": {"learning_rate": 1e-4}}
-        with patch("leukocyte_analysis.evaluation.runner.torch.load", return_value=saved):
+        with patch("leukocyte_analysis.evaluation.inference.torch.load", return_value=saved):
             with self.assertRaisesRegex(ValueError, "旧五分类权重"):
                 check_checkpoint_head(Path("old.ckpt"))
 
     def test_four_class_checkpoint_is_accepted(self) -> None:
+        """允许分类头为四行的当前检查点。"""
         saved = {"state_dict": {"backbone.fc.weight": torch.zeros(4, 512)},
                  "hyper_parameters": {}}
-        with patch("leukocyte_analysis.evaluation.runner.torch.load", return_value=saved):
+        with patch("leukocyte_analysis.evaluation.inference.torch.load", return_value=saved):
             check_checkpoint_head(Path("new.ckpt"))
 
     def test_report_and_error_images(self) -> None:
+        """正式报告含指标、预测、错分位置与混淆矩阵。"""
         dataset = SyntheticCells()
         model = LeukocyteClassifier(PixelClassifier(), torch.ones(4), 0.01, 0.0)
         predictions = predict(model, dataset, 4, torch.device("cpu"))
@@ -101,6 +111,7 @@ class TestEvaluation(unittest.TestCase):
                 output.mkdir(exist_ok=False)
 
     def test_indexed_validation_predictions_keep_manifest_indices(self) -> None:
+        """带索引的验证批次必须保持原清单的图块编号。"""
         dataset = SyntheticCells(include_index=True)
         model = LeukocyteClassifier(PixelClassifier(), torch.ones(4), 0.01, 0.0)
         predictions = predict(model, dataset, 4, torch.device("cpu"))
@@ -108,6 +119,7 @@ class TestEvaluation(unittest.TestCase):
         self.assertEqual([row["true_index"] for row in predictions], dataset.labels)
 
     def test_failed_plot_does_not_publish_partial_report(self) -> None:
+        """绘图失败时不发布半成品报告目录。"""
         dataset = SyntheticCells()
         model = LeukocyteClassifier(PixelClassifier(), torch.ones(4), 0.01, 0.0)
         predictions = predict(model, dataset, 4, torch.device("cpu"))

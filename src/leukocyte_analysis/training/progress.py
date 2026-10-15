@@ -19,11 +19,13 @@ class _ResponsiveTimeColumn(ProgressColumn):
     """窗口变窄时隐藏预计剩余时间；每次重绘都读取实时宽度。"""
 
     def __init__(self, progress_bar: "CompactRichProgressBar") -> None:
+        """引用外层进度条，以便重绘时读取当前终端宽度。"""
         super().__init__()
         self.progress_bar = progress_bar
         self.time_column = TimeRemainingColumn()
 
     def render(self, task) -> Text:
+        """窄于 80 列时隐藏预计剩余时间。"""
         if self.progress_bar.terminal_width < 80:
             return Text("")
         return self.time_column(task)
@@ -34,9 +36,11 @@ class CompactRichProgressBar(RichProgressBar):
 
     @property
     def terminal_width(self) -> int:
+        """返回 Rich 控制台的实时列数。"""
         return self._console.width if self._console is not None else get_console().width
 
     def configure_columns(self, trainer) -> list:
+        """让横向进度条占用其余空间，而不固定宽度。"""
         # 横条占用剩余空间；其它列按当前窗口宽度决定是否显示。
         return [
             TextColumn("[progress.description]{task.description}"),
@@ -46,6 +50,7 @@ class CompactRichProgressBar(RichProgressBar):
         ]
 
     def get_metrics(self, trainer, pl_module) -> dict:
+        """按窗口宽度逐级缩减终端指标，不更改日志指标名。"""
         metrics = super().get_metrics(trainer, pl_module)
         width = self.terminal_width
         if width < 80:

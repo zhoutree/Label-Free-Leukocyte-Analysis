@@ -10,11 +10,12 @@ import numpy as np
 from sklearn.model_selection import StratifiedGroupKFold
 
 from .bbbc045_config import TEST_DONORS, cv_group, model_label
-from .split import read_manifest as read_manifest
 
 
 @dataclass(frozen=True)
 class DonorFold:
+    """保存一折的原始受试者 ID；同组 ID（如 CRF101 两个年份）不跨训练/验证。"""
+
     number: int
     train_donors: frozenset[str]
     val_donors: frozenset[str]

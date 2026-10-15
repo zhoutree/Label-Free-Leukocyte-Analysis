@@ -12,12 +12,15 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
-from .split import read_manifest
-from .bbbc045_config import TEST_DONORS, TRAIN_DONORS, VAL_DONORS
-from .split import split_for_donor
+from .bbbc045_config import TEST_DONORS, TILE_SIZE, TRAIN_DONORS, VAL_DONORS
+from .split import read_manifest, split_for_donor
+
+
+BORDER_WIDTH = 5
 
 
 def _batch_name(record: dict[str, str]) -> str:
+    """从经核对的原 TIFF 相对路径提取采集批次名称。"""
     parts = record["file"].replace("\\", "/").split("/")
     if (len(parts) != 4 or parts[0] != record["donor"]
             or parts[1] != record["label"] or not parts[2].startswith("batch")):
@@ -27,16 +30,18 @@ def _batch_name(record: dict[str, str]) -> str:
 
 def _tile_metrics(block: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """整图均值、外侧 5 像素环中位数，以及图内 P90−P10。"""
-    if block.ndim != 3 or block.shape[1:] != (55, 55) or not np.isfinite(block).all():
+    if block.ndim != 3 or block.shape[1:] != (TILE_SIZE, TILE_SIZE) or not np.isfinite(block).all():
         raise ValueError("图块形状异常或含非有限像素")
-    border = np.ones((55, 55), dtype=bool)
-    border[5:-5, 5:-5] = False
+    # 外缘环只是照明代理；细胞触边时也会混入细胞像素，不能视为纯背景。
+    border = np.ones((TILE_SIZE, TILE_SIZE), dtype=bool)
+    border[BORDER_WIDTH:-BORDER_WIDTH, BORDER_WIDTH:-BORDER_WIDTH] = False
     flat = block.reshape(len(block), -1)
     p10, p90 = np.percentile(flat, (10, 90), axis=1)
     return flat.mean(axis=1), np.median(block[:, border], axis=1), p90 - p10
 
 
 def _write_csv(path: Path, rows: list[dict]) -> None:
+    """将非空审计记录按首行字段顺序写入暂存 CSV。"""
     with path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
         writer.writeheader()
@@ -44,6 +49,7 @@ def _write_csv(path: Path, rows: list[dict]) -> None:
 
 
 def _summarize(rows: list[dict], keys: tuple[str, ...]) -> list[dict]:
+    """按给定分组报告图块强度分布，不对任一组做质量筛除。"""
     groups = defaultdict(list)
     for row in rows:
         groups[tuple(row[key] for key in keys)].append(row)
@@ -60,6 +66,7 @@ def _summarize(rows: list[dict], keys: tuple[str, ...]) -> list[dict]:
 
 
 def _compare_batches(groups: list[dict]) -> list[dict]:
+    """对同一受试者、同一原始类别的批次计算 B/A 比值及差值。"""
     by_donor_class = defaultdict(list)
     for row in groups:
         by_donor_class[(row["donor"], row["label"])].append(row)
@@ -78,6 +85,7 @@ def _compare_batches(groups: list[dict]) -> list[dict]:
 
 
 def _save_plot(comparisons: list[dict], output: Path) -> None:
+    """仅展示双方至少 50 张的最大 20 组差异；不影响 CSV 或训练。"""
     eligible = [row for row in comparisons if min(row["tiles_a"], row["tiles_b"]) >= 50]
     eligible.sort(key=lambda row: abs(row["border_median_proxy_ratio_b_over_a"] - 1),
                   reverse=True)
@@ -103,7 +111,12 @@ def audit_intensity(
     split_csv: Path, tiles_npy: Path, output_dir: Path, *, chunk_size: int = 256,
     include_test: bool = False,
 ) -> dict:
-    """按清单行号扫描指定受试者；测试集只能显式纳入事后描述。"""
+    """按清单行号分批扫描明场强度，并原子发布描述性报告。
+
+    默认只统计原训练／验证受试者；``include_test`` 必须显式开启，
+    纳入测试集也仅供事后分析，不可据此选择模型或预处理参数。
+    返回报告设置，不修改原始图块、标签或划分。
+    """
     if chunk_size < 1:
         raise ValueError("chunk-size 必须大于 0")
     if output_dir.exists():
@@ -148,7 +161,7 @@ def audit_intensity(
         "include_test": include_test,
         "split_counts": dict(sorted(Counter(row["split"] for row in tile_rows).items())),
         "tiles_scanned": len(tile_rows),
-        "border_proxy": "55×55 图块外侧 5 像素环的中位数；细胞触边时并非纯背景",
+        "border_proxy": f"{TILE_SIZE}×{TILE_SIZE} 图块外侧 {BORDER_WIDTH} 像素环的中位数；细胞触边时并非纯背景",
         "contrast_proxy": "单图块像素 P90−P10；不等于形态学对比度",
     }
     output_dir.parent.mkdir(parents=True, exist_ok=True)

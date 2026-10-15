@@ -6,9 +6,6 @@ from collections import defaultdict
 from functools import partial
 from pathlib import Path
 
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 import torch
 from torchvision.transforms.v2.functional import adjust_brightness
 
@@ -17,10 +14,12 @@ from ..data.dataset import LeukocyteDataset
 from ..models.resnet import build_resnet18
 from .error_records import write_csv
 from .metrics import classification_metrics
-from .runner import check_checkpoint_head, load_classifier, predict
+from .plots import save_brightness_comparison
+from .inference import check_checkpoint_head, load_classifier, predict
 
 
 def _read_plan(run_dir: Path) -> dict:
+    """读取指定运行的分折与训练配置。"""
     with (run_dir / "plan.json").open(encoding="utf-8") as handle:
         return json.load(handle)
 
@@ -59,6 +58,7 @@ def _validate_plans(first: dict, second: dict) -> None:
 def _measure(predictions: list[dict], run: str, factor: float) -> tuple[dict, list[dict], list[dict]]:
     """汇总总体、逐类召回率和逐受试者指标。"""
     def metrics(rows: list[dict]) -> dict:
+        """按统一类别顺序计算一组预测的分类指标。"""
         return classification_metrics(
             [row["true_index"] for row in rows],
             [row["predicted_index"] for row in rows], CLASS_NAMES,
@@ -85,43 +85,16 @@ def _measure(predictions: list[dict], run: str, factor: float) -> tuple[dict, li
     return summary, classes, donors
 
 
-def _save_plots(overall: list[dict], classes: list[dict], output_dir: Path) -> None:
-    """用 matplotlib 绘制同一亮度倍率下两种训练方式的变化。"""
-    runs = list(dict.fromkeys(row["run"] for row in overall))
-    fig, axes = plt.subplots(1, 2, figsize=(10, 4), constrained_layout=True)
-    for run in runs:
-        rows = sorted((row for row in overall if row["run"] == run),
-                      key=lambda row: row["brightness_factor"])
-        for axis, metric in zip(axes, ("accuracy", "macro_f1")):
-            axis.plot([row["brightness_factor"] for row in rows],
-                      [row[metric] for row in rows], marker="o", label=run)
-    for axis, metric in zip(axes, ("accuracy", "macro_f1")):
-        axis.set(xlabel="Brightness multiplier", ylabel=metric, ylim=(0, 1.02))
-        axis.grid(alpha=0.3)
-    axes[0].legend()
-    fig.savefig(output_dir / "overall.png", dpi=160)
-    plt.close(fig)
-
-    fig, axes = plt.subplots(2, 2, figsize=(10, 8), constrained_layout=True)
-    for axis, name in zip(axes.flat, CLASS_NAMES):
-        for run in runs:
-            rows = sorted((row for row in classes if row["run"] == run
-                           and row["class"] == name),
-                          key=lambda row: row["brightness_factor"])
-            axis.plot([row["brightness_factor"] for row in rows],
-                      [row["recall"] for row in rows], marker="o", label=run)
-        axis.set(title=name, xlabel="Brightness multiplier", ylabel="Recall", ylim=(0, 1.02))
-        axis.grid(alpha=0.3)
-    axes.flat[0].legend()
-    fig.savefig(output_dir / "per_class_recall.png", dpi=160)
-    plt.close(fig)
-
-
 def compare_brightness(
     baseline_run: Path, augmented_run: Path, output_dir: Path, *,
     factors: tuple[float, ...] = (0.8, 1.0, 1.2), batch_size: int = 128,
 ) -> list[dict]:
-    """只重跑各折验证集推理，不训练，也不读取原测试集。"""
+    """用两组固定权重比较相同折外图块的亮度扰动响应。
+
+    两次运行除训练增强外必须具有相同数据、分折与超参数。
+    各亮度倍率只用于验证集推理，原测试集不读取；结果写入全新
+    报告目录，返回每组倍率的总体指标行。
+    """
     if batch_size < 1 or not factors or any(factor <= 0 for factor in factors):
         raise ValueError("batch-size 和所有亮度倍率必须大于 0")
     if len(set(factors)) != len(factors) or 1.0 not in factors:
@@ -188,6 +161,6 @@ def compare_brightness(
             "validation_only": True,
             "excluded_donors": sorted(TEST_DONORS),
         }, ensure_ascii=False, indent=2), encoding="utf-8")
-        _save_plots(overall_rows, class_rows, staged)
+        save_brightness_comparison(overall_rows, class_rows, staged, CLASS_NAMES)
         staged.rename(output_dir)
     return overall_rows

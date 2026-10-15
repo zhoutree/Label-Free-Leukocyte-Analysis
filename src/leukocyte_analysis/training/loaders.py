@@ -23,7 +23,11 @@ def make_loaders(
     device: torch.device,
     augmentation: str = "none",
 ) -> tuple[DataLoader, DataLoader, torch.Tensor]:
-    """只增强训练集、只用训练标签计算权重；验证集保持原始分布。"""
+    """返回训练加载器、带原索引的验证加载器及四类损失权重。
+
+    随机增强只作用训练图块；类别权重只由训练标签的数量计算。
+    ``seed`` 固定训练集打乱顺序，验证集不打乱也不增强。
+    """
     if augmentation not in AUGMENTATION_MODES:
         raise ValueError(f"未知增强方式：{augmentation}")
     # 翻转不会插值或裁掉 55×55 图中的细胞结构。

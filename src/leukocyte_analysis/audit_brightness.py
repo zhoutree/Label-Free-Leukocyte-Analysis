@@ -10,6 +10,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
 def main() -> None:
+    """解析审计范围并把真实亮度统计写入独立报告目录。"""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--split-csv", type=Path,
                         default=PROJECT_ROOT / "data/processed/bbbc045_split.csv")

@@ -7,6 +7,7 @@ from .evaluation.brightness import compare_brightness
 
 
 def main() -> None:
+    """从命令行比较两组交叉验证权重的折外亮度敏感度。"""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--baseline-run", type=Path, required=True)
     parser.add_argument("--augmented-run", type=Path, required=True)

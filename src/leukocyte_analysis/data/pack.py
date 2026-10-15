@@ -14,7 +14,11 @@ from .bbbc045_config import TILE_SIZE
 def pack_tiles(
     data_root: Path, split_csv: Path, output_npy: Path
 ) -> tuple[int, int]:
-    """每张 TIFF 只读取一次，并按 CSV 行顺序存储图块。"""
+    """每张 TIFF 只读取一次，并按 CSV 行顺序存储原始图块。
+
+    输出是 ``(图块数, 原始 TIFF 数)``。打包值保持 float32，不做归一化；
+    全部完成后才发布输出文件，已有文件不会被覆盖。
+    """
     with split_csv.open("r", newline="", encoding="utf-8") as csv_file:
         records = list(csv.DictReader(csv_file))
 
@@ -91,7 +95,10 @@ def verify_pack(
     packed_npy: Path,
     checks: int = 10,
 ) -> None:
-    """抽查打包图块是否与 CSV 指向的原始 TIFF 完全一致。"""
+    """按固定随机种子抽查原始 TIFF 和打包图块的逐像素一致性。
+
+    除 ``checks`` 个随机位置外，始终检查清单首尾；不改写任何数据。
+    """
     with split_csv.open("r", newline="", encoding="utf-8") as csv_file:
         records = list(csv.DictReader(csv_file))
 

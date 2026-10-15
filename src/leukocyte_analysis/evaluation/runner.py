@@ -1,77 +1,19 @@
-"""加载最佳检查点，对保留测试集推理并输出可复核报告。"""
+"""为保留测试集生成可复核报告；通用推理实现见 inference。"""
 
 import json
 import tempfile
 from pathlib import Path
 
-import lightning as L
 import torch
 from sklearn.metrics import classification_report
-from torch import nn
-from torch.utils.data import DataLoader
 
 from ..data.bbbc045_config import CLASS_NAMES
 from ..data.dataset import LeukocyteDataset
 from ..models.resnet import build_resnet18
-from ..training.module import LeukocyteClassifier
-from ..training.progress import CompactRichProgressBar, prepare_console_output
 from .error_records import ERROR_FIELDS, misclassified_rows, write_csv
+from .inference import check_checkpoint_head, load_classifier, predict
 from .metrics import classification_metrics
 from .plots import save_confusion_matrices, save_error_examples
-
-
-def check_checkpoint_head(checkpoint: Path) -> None:
-    """在推理前拒绝旧五分类检查点，避免标签含义与新模型错配。"""
-    saved = torch.load(checkpoint, map_location="cpu", weights_only=True)
-    head = saved["state_dict"].get("backbone.fc.weight")
-    if head is None or head.ndim != 2 or head.shape[0] != len(CLASS_NAMES):
-        raise ValueError("只支持新四分类 ResNet 检查点；旧五分类权重不能用于四分类评估")
-
-
-def load_classifier(checkpoint: Path, backbone: nn.Module) -> LeukocyteClassifier:
-    """从本项目生成的 Lightning 检查点恢复网络，无须再下载预训练权重。"""
-    return LeukocyteClassifier.load_from_checkpoint(
-        str(checkpoint), backbone=backbone,
-        class_weights=torch.ones(len(CLASS_NAMES)), map_location="cpu",
-        weights_only=False,  # 仅加载自己训练的可信检查点。
-    )
-
-
-def predict(model: LeukocyteClassifier, dataset: LeukocyteDataset, batch_size: int,
-            device: torch.device) -> list[dict]:
-    """由 Lightning 接管顺序推理，再将输出关联到清单索引。"""
-    if tuple(model.class_names) != tuple(dataset.class_names):
-        raise ValueError("模型与数据集的类别顺序不一致")
-    prepare_console_output()
-    loader = DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=0,
-                        pin_memory=device.type == "cuda")
-    trainer = L.Trainer(
-        accelerator="gpu" if device.type == "cuda" else "cpu", devices=1,
-        logger=False, enable_checkpointing=False, enable_model_summary=False,
-        callbacks=[CompactRichProgressBar(refresh_rate=5)],
-    )
-    # predict_step 已把三个输出移至 CPU；测试集结果可安全保存在内存中。
-    batches = trainer.predict(model, dataloaders=loader, return_predictions=True)
-    if batches is None:
-        raise RuntimeError("Lightning 没有返回预测结果")
-    records = []
-    offset = 0
-    for targets, predicted, confidence in batches:
-        for target, guess, score in zip(targets.tolist(), predicted.tolist(),
-                                        confidence.tolist()):
-            packed_index, label, donor = dataset.samples[offset]
-            if target != label:
-                raise ValueError("DataLoader 顺序与数据清单不一致")
-            records.append({
-                "packed_index": packed_index, "donor": donor,
-                "true_index": target, "true_label": dataset.class_names[target],
-                "predicted_index": guess, "predicted_label": dataset.class_names[guess],
-                "confidence": score,
-            })
-            offset += 1
-    if offset != len(dataset):
-        raise ValueError("推理结果数量与测试集不一致")
-    return records
 
 
 def save_report(dataset: LeukocyteDataset, predictions: list[dict], output_dir: Path) -> dict:
@@ -118,7 +60,11 @@ def _write_report(dataset: LeukocyteDataset, predictions: list[dict], output_dir
 
 def evaluate_checkpoint(checkpoint: Path, split_csv: Path, tiles_npy: Path,
                         stats_json: Path, output_dir: Path, batch_size: int) -> dict:
-    """只读取 test 划分；测试集不参与权重或超参数选择。"""
+    """只对 ``test`` 划分推理，并在新目录发布可复核报告。
+
+    使用传入的训练统计量标准化图块；测试集不参与权重或超参数选择。
+    返回总体准确率、macro-F1 及逐类报告，拒绝覆盖已有结果。
+    """
     for path in (checkpoint, split_csv, tiles_npy, stats_json):
         if not path.is_file():
             raise FileNotFoundError(path)

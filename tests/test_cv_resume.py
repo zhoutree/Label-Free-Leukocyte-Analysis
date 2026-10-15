@@ -12,12 +12,15 @@ import torch
 
 from leukocyte_analysis.data.bbbc045_config import TEST_DONORS, TRAIN_DONORS, VAL_DONORS
 from leukocyte_analysis.data.cv_split import build_donor_folds, write_fold_manifest
-from leukocyte_analysis.training.cross_validation import _metrics
+from leukocyte_analysis.training.cv_reports import fold_metrics
 from leukocyte_analysis.training.cv_resume import resume_cv_fold
 
 
 class TestResumeFold(unittest.TestCase):
+    """检查单折续训选择规则与原运行只读约束。"""
+
     def test_extends_only_second_fold_without_changing_source(self) -> None:
+        """只延长第二折，并按新旧 macro-F1 选择折外预测。"""
         with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent) as temporary:
             root = Path(temporary)
             source_dir = root / "original"
@@ -64,7 +67,7 @@ class TestResumeFold(unittest.TestCase):
                 fold_results.append({
                     "fold": fold.number, "val_donors": sorted(fold.val_donors),
                     "checkpoint": str(checkpoints / "best.ckpt"),
-                    "metrics": _metrics(rows),
+                    "metrics": fold_metrics(rows),
                 })
             plan = {
                 "source_manifest": str(manifest), "packed_tiles": str(root / "tiles.npy"),
@@ -87,6 +90,7 @@ class TestResumeFold(unittest.TestCase):
                              for row in original_rows[2]]
 
             def fake_train(*args, **kwargs):
+                """核对续训沿用原日程，并创建新运行的检查点标记。"""
                 self.assertEqual(kwargs["resume_checkpoint"].name, "last.ckpt")
                 self.assertEqual(args[5], 30)
                 self.assertEqual(kwargs["schedule_epochs"], 20)
