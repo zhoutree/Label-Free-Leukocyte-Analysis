@@ -78,6 +78,9 @@ class TestCrossValidationOrchestration(unittest.TestCase):
                     first_fold_only=True,
                 )
                 self.assertTrue(first["partial"])
+                self.assertFalse(Path(first["plan"]["source_manifest"]).is_absolute())
+                self.assertFalse(Path(first["plan"]["packed_tiles"]).is_absolute())
+                self.assertFalse(Path(first["fold_results"][0]["checkpoint"]).is_absolute())
                 self.assertEqual(first["plan"]["training"]["label_smoothing"], 0.05)
                 self.assertEqual(training.call_args_list[0].kwargs["label_smoothing"], 0.05)
                 self.assertEqual(training.call_args_list[0].kwargs["early_stopping_min_delta"], 0.0)

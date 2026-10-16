@@ -20,6 +20,8 @@ def parse_args() -> argparse.Namespace:
                         help="完整训练和评估第一折，保存计划以便稍后继续")
     stages.add_argument("--continue-run", type=Path,
                         help="沿用该运行目录的 plan.json，完成尚未训练的折")
+    parser.add_argument("--relocate-inputs", action="store_true",
+                        help="继续旧运行时改用当前 --split-csv 和 --tiles-npy 路径")
     args = parser.parse_args()
     if args.folds < 2:
         parser.error("folds 至少为 2")
@@ -28,6 +30,8 @@ def parse_args() -> argparse.Namespace:
         parser.error("冒烟测试不能与分阶段交叉验证同时使用")
     if args.continue_run and args.output_dir:
         parser.error("继续运行时目录由 --continue-run 指定，不再传 --output-dir")
+    if args.relocate_inputs and not args.continue_run:
+        parser.error("--relocate-inputs 只能与 --continue-run 同用")
     return args
 
 
@@ -37,7 +41,11 @@ def main() -> None:
     if args.init == "imagenet":
         os.environ.setdefault("TORCH_HOME", str(PROJECT_ROOT / "data/pretrained"))
     if args.continue_run:
-        summary = continue_cross_validation(args.continue_run)
+        summary = continue_cross_validation(
+            args.continue_run,
+            split_csv=args.split_csv if args.relocate_inputs else None,
+            tiles_npy=args.tiles_npy if args.relocate_inputs else None,
+        )
         metrics = summary["out_of_fold"]
         print(f"折外准确率：{metrics['accuracy']:.4f}；macro-F1：{metrics['macro_f1']:.4f}")
         print("结果目录：", args.continue_run)

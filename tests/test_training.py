@@ -79,12 +79,16 @@ class TestTrainingConfiguration(unittest.TestCase):
                     parse_cv_args()
 
     def test_shared_training_validation_rejects_invalid_lr(self) -> None:
-        """两种入口都通过同一检查拒绝零学习率。"""
+        """两种入口都拒绝非正或非有限的优化器参数。"""
         for command, parse in (("leukocyte-train", parse_args),
                                ("leukocyte-cross-validate", parse_cv_args)):
-            with self.subTest(command=command), patch.object(sys, "argv", [command, "--lr", "0"]):
-                with patch("sys.stderr"), self.assertRaises(SystemExit):
-                    parse()
+            for option, value in (("--lr", "0"), ("--lr", "nan"), ("--lr", "inf"),
+                                  ("--weight-decay", "nan"), ("--weight-decay", "inf")):
+                with self.subTest(command=command, option=option, value=value), patch.object(
+                    sys, "argv", [command, option, value]
+                ):
+                    with patch("sys.stderr"), self.assertRaises(SystemExit):
+                        parse()
 
     def test_random_initialization_can_be_selected(self) -> None:
         """保留从头训练和关闭权重衰减的显式选择。"""

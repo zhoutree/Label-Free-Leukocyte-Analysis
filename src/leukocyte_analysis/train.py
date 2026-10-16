@@ -9,7 +9,7 @@ import lightning as L
 import torch
 
 from .data.bbbc045_config import CLASS_NAMES, CV_GROUP_OVERRIDES
-from .data.split import read_manifest, summarize_split_groups
+from .data.split import read_manifest, summarize_split_groups, validate_fixed_splits
 from .models.resnet import build_resnet18
 from .training.arguments import (DEFAULT_TRAIN_EPOCHS, PROJECT_ROOT,
                                  add_training_arguments, validate_training_arguments)
@@ -32,6 +32,7 @@ def main() -> None:
     """连接数据、模型、优化器与训练流程；不读取测试集。"""
     args = parse_args()
     _, records = read_manifest(args.split_csv)
+    validate_fixed_splits(records)
     split_groups = summarize_split_groups(records)
     print("CRF101 同组规则：", CV_GROUP_OVERRIDES)
     L.seed_everything(args.seed, workers=True)

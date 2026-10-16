@@ -9,6 +9,7 @@ from ..data.bbbc045_config import (
     CLASS_NAMES, TEST_DONORS, TRAIN_DONORS, VAL_DONORS,
 )
 from ..data.cv_split import build_donor_folds, write_fold_manifest
+from ..data.integrity import validate_bundle
 from ..data.split import read_manifest
 from ..data.stats import write_train_stats
 from ..evaluation.inference import load_classifier, predict
@@ -21,6 +22,7 @@ from .module import (
     COSINE_MIN_LR_RATIO, COSINE_WARMUP_EPOCHS, COSINE_WARMUP_START_FACTOR,
     PLATEAU_COOLDOWN, PLATEAU_FACTOR, PLATEAU_MIN_LR_RATIO, PLATEAU_PATIENCE,
 )
+from .run_paths import resolve_run_path, store_run_path
 
 
 def run_cross_validation(
@@ -33,12 +35,14 @@ def run_cross_validation(
     continue_run: bool = False,
     label_smoothing: float = 0.0,
     early_stopping_min_delta: float = EARLY_STOP_MIN_DELTA,
+    relocated_inputs: bool = False,
 ) -> dict:
     """在固定留出的测试受试者之外训练并汇总逐折验证预测。
 
     每折独立计算训练像素统计量、初始化模型并保存最佳权重。
     ``first_fold_only`` 写入可接续的部分报告；``continue_run`` 先校验
     原计划再跳过已完成折；``smoke_test`` 只验证流程而不生成成绩。
+    ``relocated_inputs`` 仅供用户显式更换旧计划中的数据路径。
     """
     output_dir = output_dir.resolve()
     if smoke_test and (first_fold_only or continue_run):
@@ -53,6 +57,19 @@ def run_cross_validation(
         raise ValueError("原测试受试者与清单划分不一致")
     if not tiles_npy.is_file():
         raise FileNotFoundError(tiles_npy)
+    if continue_run and relocated_inputs:
+        # 核对完整清单、已保存折及其训练统计量绑定的图块包。
+        saved_fold_csv = output_dir / "fold_01" / "data" / "split.csv"
+        saved_stats_json = output_dir / "fold_01" / "data" / "train_stats.json"
+        _, saved_rows = read_manifest(saved_fold_csv)
+        if len(records) != len(saved_rows) or any(
+            {key: value for key, value in row.items() if key != "split"}
+            != {key: value for key, value in saved.items() if key != "split"}
+            for row, saved in zip(records, saved_rows)
+        ):
+            raise ValueError("迁移后的清单与原运行保存的图块记录不一致")
+        saved_stats = json.loads(saved_stats_json.read_text(encoding="utf-8"))
+        validate_bundle(saved_fold_csv, tiles_npy, saved_stats, len(saved_rows))
     folds = build_donor_folds(records, n_splits, seed)
     training = {
         "epochs": epochs, "batch_size": batch_size,
@@ -73,10 +90,17 @@ def run_cross_validation(
         "early_stopping_patience": early_stopping_patience,
         "early_stopping_min_delta": early_stopping_min_delta,
     }
-    plan = build_cv_plan(split_csv, tiles_npy, folds, seed, training)
+    plan = build_cv_plan(split_csv, tiles_npy, folds, seed, training, output_dir)
+    if continue_run:
+        saved_plan = json.loads((output_dir / "plan.json").read_text(encoding="utf-8"))
+        for field, path in (("source_manifest", split_csv), ("packed_tiles", tiles_npy)):
+            if resolve_run_path(output_dir, saved_plan[field]) == path.resolve():
+                # 未迁移的旧版绝对路径仍按原格式比较，不改写历史计划。
+                plan[field] = saved_plan[field]
     results, all_predictions = prepare_cv_run(
         output_dir, plan, folds, continue_run=continue_run,
         label_smoothing=label_smoothing,
+        allow_relocated_inputs=relocated_inputs,
     )
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -122,7 +146,8 @@ def run_cross_validation(
         results.append({
             "fold": fold.number, "train_tiles": counts["train"],
             "val_tiles": counts["val"], "val_donors": sorted(fold.val_donors),
-            "checkpoint": str(checkpoint), "metrics": fold_metrics(predictions),
+            "checkpoint": store_run_path(checkpoint, output_dir),
+            "metrics": fold_metrics(predictions),
         })
         all_predictions.extend(predictions)
         if fold.number < n_splits:
@@ -143,18 +168,25 @@ def run_cross_validation(
     (output_dir / "summary.json").write_text(
         json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8"
     )
+    if continue_run and relocated_inputs:
+        (output_dir / "plan.json").write_text(
+            json.dumps(plan, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
     return summary
 
 
-def continue_cross_validation(output_dir: Path) -> dict:
+def continue_cross_validation(output_dir: Path, *, split_csv: Path | None = None,
+                              tiles_npy: Path | None = None) -> dict:
     """按原 ``plan.json`` 的数据与超参数补齐剩余折。
 
     已完成折的权重和预测保持不变，返回更新后的折外汇总。
+    迁移旧运行后可显式传入原清单和图块在新位置的路径。
     """
     plan = json.loads((output_dir / "plan.json").read_text(encoding="utf-8"))
     settings = plan["training"]
     return run_cross_validation(
-        Path(plan["source_manifest"]), Path(plan["packed_tiles"]), output_dir,
+        resolve_run_path(output_dir, plan["source_manifest"], split_csv),
+        resolve_run_path(output_dir, plan["packed_tiles"], tiles_npy), output_dir,
         n_splits=len(plan["folds"]), seed=plan["seed"],
         epochs=settings["epochs"], batch_size=settings["batch_size"],
         learning_rate=settings["learning_rate"], weight_decay=settings["weight_decay"],
@@ -163,4 +195,5 @@ def continue_cross_validation(output_dir: Path) -> dict:
         lr_scheduler=settings["lr_scheduler"], continue_run=True,
         label_smoothing=settings.get("label_smoothing", 0.0),
         early_stopping_min_delta=settings.get("early_stopping_min_delta", 0.0),
+        relocated_inputs=split_csv is not None or tiles_npy is not None,
     )

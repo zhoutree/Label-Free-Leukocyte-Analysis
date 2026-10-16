@@ -13,6 +13,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from .bbbc045_config import TEST_DONORS, TILE_SIZE, TRAIN_DONORS, VAL_DONORS
+from .integrity import validate_pack_provenance
 from .split import read_manifest, split_for_donor
 
 
@@ -122,6 +123,7 @@ def audit_intensity(
     if output_dir.exists():
         raise FileExistsError(output_dir)
     _fields, records = read_manifest(split_csv)
+    validate_pack_provenance(split_csv, tiles_npy)
     tiles = np.load(tiles_npy, mmap_mode="r", allow_pickle=False)
     if len(records) != len(tiles):
         raise ValueError("清单行数与图块数不一致")

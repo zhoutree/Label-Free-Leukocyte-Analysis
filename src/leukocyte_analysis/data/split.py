@@ -51,6 +51,17 @@ def split_for_donor(donor: str) -> str:
     raise ValueError(f"未知受试者 ID：{donor}")
 
 
+def validate_fixed_splits(records: list[dict[str, str]]) -> None:
+    """拒绝把固定保留的测试受试者或其他受试者放进错误数据组。"""
+    for index, record in enumerate(records):
+        expected = split_for_donor(record["donor"])
+        if record["split"] != expected:
+            raise ValueError(
+                f"第 {index} 行受试者 {record['donor']} 应属于 {expected}，"
+                f"实际属于 {record['split']}"
+            )
+
+
 def write_split_manifest(manifest_csv: Path, output_csv: Path) -> Counter:
     """成功处理全部记录后，才发布带 split 列的清单。"""
     # 同一受试者不能同时出现在两个数据组。

@@ -77,6 +77,13 @@ class TestErrorLogging(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "原始标签"):
             misclassified_rows(self.dataset, [prediction], "val", 0)
 
+    def test_correct_prediction_still_checks_source_label(self) -> None:
+        """过期 CSV 即使声称预测正确，也不能跳过真实标签核对。"""
+        prediction = {"packed_index": 17, "true_index": 0,
+                      "predicted_index": 0, "confidence": 0.9}
+        with self.assertRaisesRegex(ValueError, "原始标签"):
+            misclassified_rows(self.dataset, [prediction], "val", 0)
+
     def test_validation_step_returns_only_wrong_indices(self) -> None:
         """模型验证步骤只把错分索引及置信度交给记录回调。"""
         module = LeukocyteClassifier(PixelClassifier(), torch.ones(4), 0.01, 0.0)

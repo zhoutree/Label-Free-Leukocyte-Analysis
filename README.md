@@ -82,7 +82,7 @@ python -m leukocyte_analysis.prepare_data --data-root .\data\raw\Stained_Montage
 # python -m leukocyte_analysis.prepare_data --data-root ..\Stained_Montages
 ```
 
-命令复用 `data/` 下已有的清单、划分、打包、抽查和统计模块，默认输出到 `data/processed/`。目标文件只要已有一个就会拒绝启动，不覆盖旧实验数据；需要另一份结果时使用 `--output-dir` 指向**新的**目录，并在常规训练命令中指定对应的 `--split-csv`、`--tiles-npy` 和 `--stats-json`。若运行中断，已完成的输出不会自动删除；核对后可选择新的输出目录重做。数据准备会读取和打包全部 TIFF，耗时且需数 GB 磁盘空间；本仓库不附带原图、处理数据或预训练权重。完成后按下一节先跑轻量测试，再启动训练。
+命令复用 `data/` 下已有的清单、划分、打包、抽查和统计模块，默认输出到 `data/processed/`。目标文件只要已有一个就会拒绝启动，不覆盖旧实验数据；需要另一份结果时使用 `--output-dir` 指向**新的**目录，并在常规训练命令中指定对应的 `--split-csv`、`--tiles-npy` 和 `--stats-json`。图块旁的 `.meta.json` 须随 `.npy` 一起保留。若运行中断，已完成的输出不会自动删除；核对后可选择新的输出目录重做。数据准备会读取和打包全部 TIFF，耗时且需数 GB 磁盘空间；本仓库不附带原图、处理数据或预训练权重。完成后按下一节先跑轻量测试，再启动训练。
 
 ## 快速运行
 
@@ -145,11 +145,11 @@ tests/                          不依赖完整数据集的自动化测试
 
 ## 当前数据
 
-- `data/processed/bbbc045_tiles.npy`：100,105 个 55×55 明场图块；第 `i` 个图块对应清单第 `i` 行。
+- `data/processed/bbbc045_tiles.npy`：100,105 个 55×55 明场图块；第 `i` 个图块对应清单第 `i` 行。新准备的数据会同时生成 `bbbc045_tiles.npy.meta.json`，记录图块内容及打包时的行顺序指纹。
 - `data/processed/bbbc045_manifest.csv`：图块来源、受试者、类别和网格位置。
 - `data/processed/bbbc045_split.csv`：在清单基础上增加 train/val/test 划分。清单始终保留原始 B/T 标签；训练加载时才映射为四类，不需重新裁切或打包。
 - `CRF101_2014` 和 `CRF101_2015` 共用 CRF101 编号；官方资料尚未明确核实是否同一人，因此保守地视作同一划分组。当前固定划分中两者均在训练集。今后的常规训练即使用自定义 `--split-csv`，启动前也会拒绝把它们分到不同的 train/val/test 侧；交叉验证同样保持同折。
-- `data/processed/bbbc045_train_stats.json`：仅由训练集计算的归一化参数。
+- `data/processed/bbbc045_train_stats.json`：仅由训练集计算的归一化参数；新生成的文件也记录清单和图块包的指纹。新统计文件若依赖图块旁的 `.meta.json`，缺失它会直接报错；旧包没有顺序元数据时仍可使用，但会提示降级。此时仍可核对图块规格、行数和统计文件所记录的当前输入指纹，不能事后证明图块与原清单的打包顺序一致。
 - `reports/bbbc045_audit.json`：此前的基础审计；`reports/bbbc045_audit_focus.json`：新版审计，以每类训练图块的清晰度代理分数第 1 百分位标记 train/val 低细节候选，不自动删除样本，也不能确认多细胞或错标；`reports/previews/`：预览图。
 
 ## 运行
@@ -223,6 +223,8 @@ python -m leukocyte_analysis.cross_validate --folds 3 --init imagenet --lr 0.000
 这同时改变了增强和平滑两个因素，适合检验组合方案的总效果，但无法单独归因于其中一项。
 
 若想先完整评估第 1 折，再决定是否训练剩余两折，在同一命令末尾加 `--first-fold-only`。完成后会输出第 1 折的准确率、macro-F1 与结果目录；这不是三折折外成绩。确定继续时，用它打印的目录运行 `python -m leukocyte_analysis.cross_validate --continue-run "结果目录"`：程序按保存的 `plan.json` 复用同一划分和训练配置，只训练第 2、3 折，最后生成完整 `summary.json`。不要改动第一折的目录或把 `--smoke-test` 当作完整训练；若某折训练中途被打断，程序不会覆盖该折已有文件。
+
+新运行的 `plan.json` 和最佳检查点引用采用相对于运行目录的路径；只要数据与运行目录的相对布局不变，整体迁移后仍能解析。旧运行记录中的绝对路径仍可读取。若迁移后旧路径失效，继续交叉验证时加 `--relocate-inputs --split-csv 新清单 --tiles-npy 新图块`；单折续训可加 `--split-csv`／`--tiles-npy`，亮度压力测试可加 `--tiles-npy`。迁移时必须使用原始同一份清单和图块，不要借此更换实验数据；新生成的统计文件与图块元数据可核对指纹，旧记录若没有文件哈希，程序无法仅凭路径证明新图块内容完全相同。
 
 如需在**同一新分折**下比较固定学习率，其他设置不变、仅关闭调度：
 

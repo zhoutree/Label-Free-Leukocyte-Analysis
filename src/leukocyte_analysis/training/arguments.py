@@ -43,9 +43,10 @@ def add_training_arguments(parser: argparse.ArgumentParser, *,
 def validate_training_arguments(parser: argparse.ArgumentParser,
                                 args: argparse.Namespace) -> None:
     """拒绝两种入口共同不允许的训练超参数。"""
-    if (args.epochs < 1 or args.batch_size < 1 or args.lr <= 0
+    if (args.epochs < 1 or args.batch_size < 1 or not math.isfinite(args.lr)
+            or args.lr <= 0 or not math.isfinite(args.weight_decay)
             or args.weight_decay < 0 or args.early_stopping_patience < 0):
-        parser.error("epochs、batch-size 和 lr 必须大于 0；weight-decay 和 early-stopping-patience 不得小于 0")
+        parser.error("epochs、batch-size 和有限的 lr 必须大于 0；weight-decay 必须为非负有限数，early-stopping-patience 不得小于 0")
     if (not math.isfinite(args.label_smoothing) or not 0 <= args.label_smoothing < 1
             or not math.isfinite(args.early_stopping_min_delta)
             or args.early_stopping_min_delta < 0):

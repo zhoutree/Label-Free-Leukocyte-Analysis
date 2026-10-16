@@ -2,6 +2,7 @@
 
 import csv
 import json
+import math
 from collections.abc import Callable
 from pathlib import Path
 
@@ -10,6 +11,7 @@ import torch
 from torch.utils.data import Dataset
 
 from .bbbc045_config import CLASS_NAMES, model_label
+from .integrity import validate_bundle
 
 
 class LeukocyteDataset(Dataset):
@@ -42,10 +44,12 @@ class LeukocyteDataset(Dataset):
         self._tiles = None  # 实际读取时才打开；各 DataLoader 进程分别映射。
         self.samples = []
         self.source_by_index = {}
+        record_count = 0
 
         # CSV 行号与 .npy 图块索引一一对应，只保留当前数据组的行。
         with split_csv.open("r", newline="", encoding="utf-8") as csv_file:
             for packed_index, record in enumerate(csv.DictReader(csv_file)):
+                record_count += 1
                 if record["split"] == split:
                     # 原始清单仍保存 B/T；只在读取时合并为淋巴细胞。
                     label = class_to_index[model_label(record["label"])]
@@ -66,8 +70,11 @@ class LeukocyteDataset(Dataset):
 
         self.mean = float(stats["mean"])
         self.std = float(stats["std"])
-        if self.std <= 0 or not self.samples:
-            raise ValueError("标准差无效或当前数据组没有样本")
+        if not math.isfinite(self.mean) or not math.isfinite(self.std) or self.std <= 0:
+            raise ValueError("归一化均值或标准差无效")
+        if not self.samples:
+            raise ValueError("当前数据组没有样本")
+        validate_bundle(split_csv, self.tiles_npy, stats, record_count)
 
     def __len__(self) -> int:
         """返回当前数据划分中的图块数。"""

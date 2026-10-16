@@ -41,6 +41,14 @@ class TestBrightnessStress(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "超参数"):
             _validate_plans(first, changed)
 
+    def test_relative_plan_paths_compare_resolved_sources(self) -> None:
+        """相同相对字符串在不同目录下不一定指向同一份图块。"""
+        with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent) as temporary:
+            root = Path(temporary)
+            first, second = plan("flips"), plan("flips_photometric")
+            with self.assertRaisesRegex(ValueError, "数据路径"):
+                _validate_plans(first, second, run_dirs=(root / "a", root / "b"))
+
     def test_metrics_and_plots_use_existing_prediction_format(self) -> None:
         """总体、逐类和逐受试者统计可从同一预测格式生成。"""
         predictions = [

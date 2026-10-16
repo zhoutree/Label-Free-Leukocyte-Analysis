@@ -26,9 +26,6 @@ def misclassified_rows(dataset, predictions: list[dict], split: str,
         packed_index = int(prediction["packed_index"])
         true_index = int(prediction["true_index"])
         predicted_index = int(prediction["predicted_index"])
-        if true_index == predicted_index:
-            continue
-
         source = dataset.source_by_index[packed_index]
         true_label = dataset.class_names[true_index]
         if model_label(source["source_label"]) != true_label:
@@ -37,6 +34,8 @@ def misclassified_rows(dataset, predictions: list[dict], split: str,
             raise ValueError(f"第 {packed_index} 个图块的受试者不一致")
         if prediction.get("true_label", true_label) != true_label:
             raise ValueError(f"第 {packed_index} 个图块的模型标签不一致")
+        if true_index == predicted_index:
+            continue
 
         rows.append({
             "split": split,

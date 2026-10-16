@@ -12,6 +12,7 @@ from torchvision.transforms.v2.functional import adjust_brightness
 from ..data.bbbc045_config import CLASS_NAMES, TEST_DONORS
 from ..data.dataset import LeukocyteDataset
 from ..models.resnet import build_resnet18
+from ..training.run_paths import resolve_run_path
 from .error_records import write_csv
 from .metrics import classification_metrics
 from .plots import save_brightness_comparison
@@ -24,17 +25,23 @@ def _read_plan(run_dir: Path) -> dict:
         return json.load(handle)
 
 
-def _validate_plans(first: dict, second: dict) -> None:
+def _validate_plans(first: dict, second: dict,
+                    run_dirs: tuple[Path, Path] | None = None) -> None:
     """只允许训练增强方式不同，避免把分折或训练设置差异当作亮度效果。"""
     for plan in (first, second):
         if set(plan["excluded_donors"]) != TEST_DONORS:
             raise ValueError("交叉验证必须排除 CRF049 和 CRF066")
         if not plan["folds"]:
             raise ValueError("交叉验证计划没有分折")
-    fields = ("method", "source_manifest", "packed_tiles", "excluded_donors",
-              "seed", "folds")
+    fields = ("method", "excluded_donors", "seed", "folds")
     if any(first[field] != second[field] for field in fields):
         raise ValueError("两次运行的数据、随机种子或受试者分折不一致")
+    for field in ("source_manifest", "packed_tiles"):
+        same_source = (first[field] == second[field] if run_dirs is None else
+                       resolve_run_path(run_dirs[0], first[field])
+                       == resolve_run_path(run_dirs[1], second[field]))
+        if not same_source:
+            raise ValueError("两次运行的数据路径不一致")
     for plan in (first, second):
         seen = set()
         eligible = set(plan["folds"][0]["train_donors"]) | set(plan["folds"][0]["val_donors"])
@@ -88,12 +95,13 @@ def _measure(predictions: list[dict], run: str, factor: float) -> tuple[dict, li
 def compare_brightness(
     baseline_run: Path, augmented_run: Path, output_dir: Path, *,
     factors: tuple[float, ...] = (0.8, 1.0, 1.2), batch_size: int = 128,
+    tiles_npy: Path | None = None,
 ) -> list[dict]:
     """用两组固定权重比较相同折外图块的亮度扰动响应。
 
     两次运行除训练增强外必须具有相同数据、分折与超参数。
     各亮度倍率只用于验证集推理，原测试集不读取；结果写入全新
-    报告目录，返回每组倍率的总体指标行。
+    报告目录，返回每组倍率的总体指标行。迁移旧运行时可覆盖图块路径。
     """
     if batch_size < 1 or not factors or any(factor <= 0 for factor in factors):
         raise ValueError("batch-size 和所有亮度倍率必须大于 0")
@@ -102,10 +110,10 @@ def compare_brightness(
     if output_dir.exists():
         raise FileExistsError(output_dir)
     plans = [_read_plan(run) for run in (baseline_run, augmented_run)]
-    _validate_plans(*plans)
-    tiles_npy = Path(plans[0]["packed_tiles"])
-    if not tiles_npy.is_file():
-        raise FileNotFoundError(tiles_npy)
+    _validate_plans(*plans, run_dirs=(baseline_run, augmented_run))
+    packed_tiles = resolve_run_path(baseline_run, plans[0]["packed_tiles"], tiles_npy)
+    if not packed_tiles.is_file():
+        raise FileNotFoundError(packed_tiles)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     overall_rows, class_rows, donor_rows = [], [], []
@@ -122,7 +130,7 @@ def compare_brightness(
             )
             for factor in factors:
                 dataset = LeukocyteDataset(
-                    fold_dir / "data/split.csv", tiles_npy,
+                    fold_dir / "data/split.csv", packed_tiles,
                     fold_dir / "data/train_stats.json", "val",
                     raw_transform=(None if factor == 1.0 else partial(
                         adjust_brightness, brightness_factor=factor)),

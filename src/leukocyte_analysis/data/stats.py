@@ -6,6 +6,8 @@ from pathlib import Path
 
 import numpy as np
 
+from .integrity import file_sha256, validate_pack_provenance
+
 
 def write_train_stats(
     split_csv: Path, tiles_npy: Path, output_json: Path
@@ -21,6 +23,7 @@ def write_train_stats(
     tiles = np.load(tiles_npy, mmap_mode="r", allow_pickle=False)
     if len(records) != len(tiles):
         raise ValueError("CSV 行数与打包图块数不一致")
+    has_pack_metadata = validate_pack_provenance(split_csv, tiles_npy)
 
     train_indices = [
         index for index, record in enumerate(records)
@@ -66,9 +69,14 @@ def write_train_stats(
         "std": (m2 / pixel_count) ** 0.5,
         "min": minimum,
         "max": maximum,
+        "pack_metadata_required": has_pack_metadata,
     }
     if stats["std"] <= 0:
         raise ValueError("训练集像素标准差必须大于 0")
+
+    del tiles
+    stats["source_manifest_sha256"] = file_sha256(split_csv)
+    stats["packed_tiles_sha256"] = file_sha256(tiles_npy)
 
     output_json.parent.mkdir(parents=True, exist_ok=True)
     with output_json.open("x", encoding="utf-8") as json_file:

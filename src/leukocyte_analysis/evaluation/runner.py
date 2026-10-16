@@ -7,8 +7,9 @@ from pathlib import Path
 import torch
 from sklearn.metrics import classification_report
 
-from ..data.bbbc045_config import CLASS_NAMES
+from ..data.bbbc045_config import CLASS_NAMES, TEST_DONORS
 from ..data.dataset import LeukocyteDataset
+from ..data.split import read_manifest, validate_fixed_splits
 from ..models.resnet import build_resnet18
 from .error_records import ERROR_FIELDS, misclassified_rows, write_csv
 from .inference import check_checkpoint_head, load_classifier, predict
@@ -58,6 +59,15 @@ def _write_report(dataset: LeukocyteDataset, predictions: list[dict], output_dir
     return summary
 
 
+def _validate_heldout_test_split(split_csv: Path) -> None:
+    """正式测试只允许固定划分，且须包含两个原保留受试者。"""
+    _fields, records = read_manifest(split_csv)
+    validate_fixed_splits(records)
+    donors = {row["donor"] for row in records if row["split"] == "test"}
+    if donors != TEST_DONORS:
+        raise ValueError(f"正式测试必须包含原保留受试者 {', '.join(sorted(TEST_DONORS))}")
+
+
 def evaluate_checkpoint(checkpoint: Path, split_csv: Path, tiles_npy: Path,
                         stats_json: Path, output_dir: Path, batch_size: int) -> dict:
     """只对 ``test`` 划分推理，并在新目录发布可复核报告。
@@ -70,6 +80,7 @@ def evaluate_checkpoint(checkpoint: Path, split_csv: Path, tiles_npy: Path,
             raise FileNotFoundError(path)
     if output_dir.exists():
         raise FileExistsError(f"报告目录已存在，避免覆盖或重复评估：{output_dir}")
+    _validate_heldout_test_split(split_csv)
     check_checkpoint_head(checkpoint)
     dataset = LeukocyteDataset(split_csv, tiles_npy, stats_json, "test")
     backbone = build_resnet18(len(CLASS_NAMES), initialization="random")

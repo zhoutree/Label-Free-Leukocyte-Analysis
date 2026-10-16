@@ -1,8 +1,8 @@
 # Python 代码逐文件审查清单
 
-范围：`src/leukocyte_analysis/` 和 `tests/` 现有 60 个 Python 源文件。以下保留逐文件勾选、复用审查和注释复核记录；`[x]` 表示已检查，不表示必须修改。历史 `scripts/` 目录已按用户要求移除。
+范围：`src/leukocyte_analysis/` 和 `tests/` 现有 63 个 Python 源文件。以下保留逐文件勾选、复用审查和注释复核记录；`[x]` 表示已检查，不表示必须修改。历史 `scripts/` 目录已按用户要求移除。
 
-## `src/leukocyte_analysis/`（41）
+## `src/leukocyte_analysis/`（43）
 
 该部分以 `rg --files src/leukocyte_analysis -g '*.py'` 为准，逐文件检查职责、重复实现、依赖方向及必要注释。用户已有改动与实验产物不在此清单中。
 
@@ -18,17 +18,18 @@
 - [x] `resume_cv.py` — 单折续训入口。
 - [x] `train.py` — 常规训练参数与组装入口，不实现模型训练细节。
 
-### 数据处理（12）
+### 数据处理（13）
 
 - [x] `data/__init__.py` — 空包入口。
 - [x] `data/audit.py` — 清单、像素与清晰度都属于同一次非破坏性质量审计。
 - [x] `data/bbbc045_config.py` — 唯一的数据格式、标签及受试者配置。
 - [x] `data/cv_split.py` — scikit-learn 分折与该折清单写入，职责连贯。
-- [x] `data/dataset.py` — 数据集读取、索引追溯和归一化，保持一类。
+- [x] `data/dataset.py` — 数据集读取、索引追溯、归一化和输入指纹核对，保持一类。
 - [x] `data/grid.py` — 单一网格裁切函数。
 - [x] `data/intensity_audit.py` — 亮度扫描、分组汇总和一张诊断图；绘图仅被此审计使用，暂不额外拆微型模块。
+- [x] `data/integrity.py` — 绑定新图块包的记录顺序与内容，并核对清单和统计文件指纹；旧包保留结构校验。
 - [x] `data/manifest.py` — TIFF 扫描和清单生成。
-- [x] `data/pack.py` — 同一图块包的创建与原图抽查。
+- [x] `data/pack.py` — 同一图块包的创建、顺序元数据发布与原图抽查。
 - [x] `data/quality.py` — 单一清晰度代理指标。
 - [x] `data/split.py` — 固定受试者划分和划分清单。
 - [x] `data/stats.py` — 只从训练图块计算归一化统计量。
@@ -38,11 +39,11 @@
 - [x] `models/__init__.py` — 模型目录包说明。
 - [x] `models/resnet.py` — 使用 torchvision 构建并适配单通道小图，单一职责。
 
-### 训练（11）
+### 训练（12）
 
 - [x] `training/__init__.py` — 空包入口。
 - [x] `training/arguments.py` — 常规训练与交叉验证共用的超参数、数据路径和合法性检查；各自特有选项仍在命令入口。
-- [x] `training/cross_validation.py` — 三折训练的编排；分折计划与报告已在独立模块，保留流程控制。
+- [x] `training/cross_validation.py` — 三折训练与迁移续跑的编排；分折计划与报告已在独立模块，保留流程控制。
 - [x] `training/cv_plan.py` — 建立、保存和读取同一交叉验证计划。
 - [x] `training/cv_reports.py` — 折结果汇总与最终报告，复用评估指标函数。
 - [x] `training/cv_resume.py` — 验证来源、续训和比较结果属于同一次续训事务；虽较长，但没有第二套训练算法。
@@ -51,6 +52,7 @@
 - [x] `training/loaders.py` — 增强仅作用训练集，再创建数据集、类别权重和加载器；目前代码量有限，但增强构建可作为后续独立化候选。
 - [x] `training/module.py` — LightningModule 的训练、验证和优化器钩子，属于框架约定的一类。
 - [x] `training/progress.py` — 仅负责终端进度显示。
+- [x] `training/run_paths.py` — 运行计划的相对路径保存及旧绝对路径解析。
 
 ### 评估（7）
 
@@ -80,11 +82,11 @@
 - 在亮度代理计算处说明外缘像素并非保证纯背景；核对文案不超过代码实际验证范围。
 - 当时的 AST 复查结果：40/40 个模块、101/101 个类／函数定义有文档字符串；行为逻辑未因注释调整而改变。随后新增共用参数模块、移除了旧预览模块。
 
-## `tests/`（19）
+## `tests/`（20）
 
-范围：以 `rg --files tests -g '*.py'` 为准，现有 19 个 Python 源文件。`__pycache__/` 内的 `.pyc` 是运行生成的缓存，不计入源文件清单。逐个检查职责、重复测试或实现、可复用性、必要注释及文件是否应合并/拆分。`[x]` 表示已检查，不代表必须修改。
+范围：以 `rg --files tests -g '*.py'` 为准，现有 20 个 Python 源文件。`__pycache__/` 内的 `.pyc` 是运行生成的缓存，不计入源文件清单。逐个检查职责、重复测试或实现、可复用性、必要注释及文件是否应合并/拆分。`[x]` 表示已检查，不代表必须修改。
 
-### `tests/`（19）
+### `tests/`（20）
 
 - [x] `tests/_experiment_fixtures.py` — 三个训练实验公用的小数据加载器／临时目录，避免测试间重复准备。
 - [x] `tests/test_augmentation.py` — 专测训练增强内容及验证集隔离。
@@ -92,7 +94,7 @@
 - [x] `tests/test_cross_validation.py` — 首折运行后接续其余折的完整编排场景。
 - [x] `tests/test_cv_resume.py` — 单折从检查点续训且不更改原运行；较长的是合成三折运行的测试数据准备，不是多个被测职责。
 - [x] `tests/test_cv_split.py` — 受试者分折、CRF101 分组、留出受试者及逐折归一化统计。
-- [x] `tests/test_dataset.py` — 四分类映射、常规受试者划分和数据集读取；均属输入数据契约。
+- [x] `tests/test_dataset.py` — 四分类映射、常规受试者划分、数据集读取和新图块包指纹；均属输入数据契约。
 - [x] `tests/test_error_logging.py` — 错分记录回调的累计、历史续接和标签追溯。
 - [x] `tests/test_evaluation.py` — 合成图块的通用推理及正式报告；辅助类只服务此场景。
 - [x] `tests/test_intensity_audit.py` — 一套合成图块贯穿亮度报告及保留测试集排除开关。
@@ -102,13 +104,14 @@
 - [x] `tests/test_progress.py` — 窄终端进度条显示，不检查训练逻辑。
 - [x] `tests/test_quality.py` — 图块像素与清晰度筛查的非破坏性边界。
 - [x] `tests/test_reporting.py` — 训练数据划分记录、检查点和 TensorBoard／CSV 产物。
+- [x] `tests/test_run_paths.py` — 新旧计划路径和迁移后接续运行的兼容性。
 - [x] `tests/test_training_resume.py` — Lightning 单次训练检查点续训，与三折的单折续训不同。
 - [x] `tests/test_training.py` — 常规训练及交叉验证的 CLI 默认值与非法参数；已是从旧大型混合测试中拆出的配置测试。
 - [x] `tests/test_validation_error_callback.py` — 回调挂载和一轮训练后产出错分文件的集成测试。
 
 ### 审查结论与变更
 
-此前已逐个审查相关源文件；按用户要求先后移除六份历史／展示脚本，当前清单只列出保留的 19 个测试文件。README 的静态图和历史实验结论仍保留。
+此前已逐个审查相关源文件；按用户要求先后移除六份历史／展示脚本。当前清单列出 20 个保留的测试／夹具文件（19 个 `test_*.py` 加 `_experiment_fixtures.py`）。README 的静态图和历史实验结论仍保留。
 
 - 没有值得合并的整份测试文件：名称相近的 `test_cross_validation.py`／`test_cv_resume.py` 以及 `test_error_logging.py`／`test_validation_error_callback.py` 分别覆盖不同层次或操作。
 - 没有必须拆开的长测试文件：`test_cv_resume.py` 和 `test_intensity_audit.py` 的长度来自单一完整场景所需的合成数据，拆到共享夹具会让场景更难核对。`test_training.py` 现在只管 CLI 配置，不再是以前混合模型、数据、增强和进度显示的大文件。
@@ -140,8 +143,23 @@
 - `test_training.py`：只检查 CLI 参数，不重复训练逻辑；使用标准库 `unittest.mock`，保留。
 - `test_validation_error_callback.py`：已复用共享训练夹具，并验证真实一轮回调产物，保留。
 
-第三方框架取舍：[pytest 的 `tmp_path`](https://docs.pytest.org/en/stable/how-to/tmp_path.html) 和[参数化](https://docs.pytest.org/en/stable/how-to/parametrize.html)确实可减少新测试的样板代码；但当前测试均为 `unittest.TestCase`，[pytest 官方说明](https://docs.pytest.org/en/stable/how-to/unittest.html)仅换运行器不能让这些方法直接接收普通 pytest 夹具或参数化。为减少少量 `TemporaryDirectory` 而迁移 52 项测试并新增依赖，目前得不偿失。现有 `unittest`、`tempfile`、`unittest.mock`、PyTorch、Lightning、torchvision、scikit-learn、NumPy、Pillow、tifffile、SciPy 和 TensorBoard 已覆盖所需功能。
+第三方框架取舍：[pytest 的 `tmp_path`](https://docs.pytest.org/en/stable/how-to/tmp_path.html) 和[参数化](https://docs.pytest.org/en/stable/how-to/parametrize.html)确实可减少新测试的样板代码；但当前测试均为 `unittest.TestCase`，[pytest 官方说明](https://docs.pytest.org/en/stable/how-to/unittest.html)仅换运行器不能让这些方法直接接收普通 pytest 夹具或参数化。为减少少量 `TemporaryDirectory` 而迁移现有测试并新增依赖，目前得不偿失。现有 `unittest`、`tempfile`、`unittest.mock`、PyTorch、Lightning、torchvision、scikit-learn、NumPy、Pillow、tifffile、SciPy 和 TensorBoard 已覆盖所需功能。
 
 ### 注释复核（2026-10-15）
 
 此前已核对测试与历史诊断脚本的文档字符串，重点写明所保护的行为和探索性结果的边界。随后新增一个命令行回归测试，并按用户要求删除三个一次性脚本；本段原有的 AST 数量不再代表当前文件集合。
+
+### 路径与错误边界复查（2026-10-16）
+
+- 重新按文件清单核对原有 42 个源码文件和 20 个测试文件，无遗漏；本轮新增数据完整性模块后为 43 个源码文件。完整轻量测试通过。新运行的交叉验证计划与检查点改存运行目录相对路径；旧绝对路径可读取，迁移旧运行时可显式覆盖输入路径。没有修改原始图像、已处理图块或旧运行产物。
+- **已修复的校验缺口**：学习率和权重衰减拒绝 `nan`／`inf`；常规训练核对每个 donor 的固定划分，防止 CRF049／CRF066 等原测试受试者误入训练；错分审计对所有预测行核对真实标签，不再只核对错分行。
+- **新数据输入一致性**：打包时新增图块顺序和内容指纹，统计文件记录清单与图块包指纹；加载和续训迁移时核对。旧数据及旧运行仍可读取，但若原本没有指纹，只能核对形状、行数及已保存折的清单记录，不能事后证明 `.npy` 内容完全相同。既有成绩没有发现受这些缺口影响。
+
+### 再次逐项复核（2026-10-16）
+
+- 当前清单与文件系统一致：43 个源码文件、20 个测试／夹具文件；完整轻量测试为 **64 项通过**，`git diff --check` 无格式错误。未运行完整训练或正式数据推理。
+- [x] `evaluation/runner.py`：正式测试在推理前核对固定划分，并要求 `split=test` 恰好包含原保留受试者 CRF049／CRF066。
+- [x] `data/audit.py`、`data/intensity_audit.py`：独立质量／亮度审计也核对新图块包的顺序和内容指纹，拒绝同长度错序清单。
+- [x] `data/integrity.py`：缺少 `.npy.meta.json` 时明确警告按旧包兼容模式降级；新统计文件如已声明依赖元数据则直接拒绝。旧包仍无法事后证明原打包顺序。
+- [x] `data/pack.py`：第二次重命名失败时回滚本次发布的元数据，避免通常的发布失败留下孤立文件；进程意外中断仍需人工检查输出目录。
+- 上述修复面向新运行／自定义输入的边界风险；没有证据显示既有训练和测试成绩因此出错。未改动原始图像、已处理图块或既有运行产物。

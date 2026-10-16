@@ -1,6 +1,7 @@
 """按划分清单顺序，将明场图块无损打包成可内存映射的数组。"""
 
 import csv
+import json
 import tempfile
 from collections import defaultdict
 from pathlib import Path
@@ -9,6 +10,7 @@ import numpy as np
 import tifffile
 
 from .bbbc045_config import TILE_SIZE
+from .integrity import file_sha256, pack_metadata_path, record_order_sha256
 
 
 def pack_tiles(
@@ -33,8 +35,10 @@ def pack_tiles(
         )
 
     output_npy.parent.mkdir(parents=True, exist_ok=True)
-    if output_npy.exists():
-        raise FileExistsError(f"输出文件已存在：{output_npy}")
+    metadata_path = pack_metadata_path(output_npy)
+    for target in (output_npy, metadata_path):
+        if target.exists():
+            raise FileExistsError(f"输出文件已存在：{target}")
 
     # 临时文件与正式文件位于同一磁盘，失败时自动清理。
     with tempfile.TemporaryDirectory(
@@ -83,8 +87,23 @@ def pack_tiles(
             # Windows 清理临时目录前，先释放内存映射文件。
             del tiles
 
+        # 顺序与内容绑定到新包，供后续统计、训练和交叉验证核对。
+        metadata = {
+            "record_order_sha256": record_order_sha256(records),
+            "packed_tiles_sha256": file_sha256(temporary_npy),
+        }
+        temporary_metadata = Path(temporary) / metadata_path.name
+        temporary_metadata.write_text(
+            json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
         # 图块已全部写完并释放映射后才发布。
-        temporary_npy.rename(output_npy)
+        temporary_metadata.rename(metadata_path)
+        try:
+            temporary_npy.rename(output_npy)
+        except OSError:
+            # 只回滚本次刚发布的元数据；图块仍在临时目录中自动清理。
+            metadata_path.unlink()
+            raise
 
     return len(records), len(by_file)
 

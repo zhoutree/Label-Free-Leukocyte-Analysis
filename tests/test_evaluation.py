@@ -11,7 +11,9 @@ import torch
 from torch import nn
 
 from leukocyte_analysis.data.bbbc045_config import CLASS_NAMES
-from leukocyte_analysis.evaluation.runner import check_checkpoint_head, predict, save_report
+from leukocyte_analysis.evaluation.runner import (
+    _validate_heldout_test_split, check_checkpoint_head, predict, save_report,
+)
 from leukocyte_analysis.training.module import LeukocyteClassifier
 
 
@@ -62,6 +64,34 @@ class PixelClassifier(nn.Module):
 
 class TestEvaluation(unittest.TestCase):
     """验证四分类检查点、索引追溯和报告原子发布。"""
+
+    def test_formal_test_requires_both_original_heldout_donors(self) -> None:
+        """错误划分或缺少受试者的清单不能被称为原保留测试集。"""
+        with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent) as temporary:
+            manifest = Path(temporary) / "split.csv"
+            records = [
+                {"file": f"{donor}/B/batch1/ch5_1.tif", "donor": donor,
+                 "label": "B", "row": "0", "col": "0", "split": split}
+                for donor, split in (("CRF022", "train"), ("CRF049", "test"),
+                                     ("CRF066", "test"))
+            ]
+
+            def write_records(rows: list[dict]) -> None:
+                """按固定列写入小清单，供三种划分情况共用。"""
+                with manifest.open("w", newline="", encoding="utf-8") as handle:
+                    writer = csv.DictWriter(handle, fieldnames=list(records[0]))
+                    writer.writeheader()
+                    writer.writerows(rows)
+
+            write_records(records)
+            _validate_heldout_test_split(manifest)
+            with self.assertRaisesRegex(ValueError, "必须包含原保留受试者"):
+                write_records(records[:-1])
+                _validate_heldout_test_split(manifest)
+            records[0]["split"] = "test"
+            write_records(records)
+            with self.assertRaisesRegex(ValueError, "CRF022.*train"):
+                _validate_heldout_test_split(manifest)
 
     def test_old_five_class_checkpoint_is_rejected(self) -> None:
         """拒绝旧五分类权重以防输出列含义错配。"""

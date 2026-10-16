@@ -4,6 +4,7 @@ import argparse
 from pathlib import Path
 
 from .data.manifest import write_manifest
+from .data.integrity import pack_metadata_path
 from .data.pack import pack_tiles, verify_pack
 from .data.split import write_split_manifest
 from .data.stats import write_train_stats
@@ -21,7 +22,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR,
-        help="输出四个训练输入文件；默认 data/processed/",
+        help="输出训练输入及图块顺序元数据；默认 data/processed/",
     )
     return parser.parse_args()
 
@@ -34,7 +35,8 @@ def prepare_data(data_root: Path, output_dir: Path) -> None:
     stats = output_dir / "bbbc045_train_stats.json"
 
     # 在耗时的 TIFF 处理前核对所有目标，避免覆盖或形成新旧文件混合。
-    existing = [path for path in (manifest, split, tiles, stats) if path.exists()]
+    existing = [path for path in (manifest, split, tiles, pack_metadata_path(tiles), stats)
+                if path.exists()]
     if existing:
         raise FileExistsError(
             "以下输出已存在，请选择新的 --output-dir，勿覆盖现有数据："

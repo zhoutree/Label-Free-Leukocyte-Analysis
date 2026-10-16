@@ -14,6 +14,8 @@ def main() -> None:
     """解析单折续训参数，并打印续训后选用的检查点结果。"""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source-run", type=Path, required=True)
+    parser.add_argument("--split-csv", type=Path, help="迁移旧运行后使用的新清单位置")
+    parser.add_argument("--tiles-npy", type=Path, help="迁移旧运行后使用的新图块位置")
     parser.add_argument("--fold", type=int, required=True)
     parser.add_argument("--epochs", type=int, required=True,
                         help="续训后的总轮数上限，不是额外增加的轮数")
@@ -25,7 +27,8 @@ def main() -> None:
         PROJECT_ROOT / "runs" / f"cv_fold{args.fold:02d}_extended_{datetime.now():%Y%m%d_%H%M%S}"
     )
     summary = resume_cv_fold(args.source_run, output_dir,
-                             fold_number=args.fold, epochs=args.epochs)
+                             fold_number=args.fold, epochs=args.epochs,
+                             split_csv=args.split_csv, tiles_npy=args.tiles_npy)
     print("第", args.fold, "折续训后选用：", summary["continuation"]["selected"])
     print(f"折外准确率：{summary['out_of_fold']['accuracy']:.4f}；"
           f"macro-F1：{summary['out_of_fold']['macro_f1']:.4f}")

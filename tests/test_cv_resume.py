@@ -33,6 +33,7 @@ class TestResumeFold(unittest.TestCase):
                 for donor in donors
             ]
             manifest = root / "manifest.csv"
+            (root / "tiles.npy").touch()
             with manifest.open("w", newline="", encoding="utf-8") as handle:
                 writer = csv.DictWriter(handle, fieldnames=list(records[0]))
                 writer.writeheader()
@@ -117,8 +118,13 @@ class TestResumeFold(unittest.TestCase):
             self.assertEqual(summary["continuation"]["selected"], "extended")
             self.assertEqual(summary["out_of_fold"]["samples"], len(TRAIN_DONORS | VAL_DONORS))
             self.assertEqual(summary["out_of_fold"]["accuracy"], 1.0)
-            self.assertEqual(summary["fold_results"][0], fold_results[0])
-            self.assertEqual(summary["fold_results"][2], fold_results[2])
+            for index in (0, 2):
+                self.assertEqual(summary["fold_results"][index]["metrics"],
+                                 fold_results[index]["metrics"])
+                self.assertEqual(
+                    (output / summary["fold_results"][index]["checkpoint"]).resolve(),
+                    Path(fold_results[index]["checkpoint"]),
+                )
             self.assertTrue((output / "summary.json").is_file())
 
 

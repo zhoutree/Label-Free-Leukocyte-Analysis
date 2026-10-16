@@ -15,15 +15,18 @@ from ..models.resnet import build_resnet18
 from .cv_reports import fold_metrics, read_predictions, summarize_predictions, write_predictions
 from .experiment import run_training
 from .loaders import make_loaders
+from .run_paths import resolve_run_path, store_run_path
 
 
 def resume_cv_fold(source_dir: Path, output_dir: Path, *, fold_number: int,
-                   epochs: int) -> dict:
+                   epochs: int, split_csv: Path | None = None,
+                   tiles_npy: Path | None = None) -> dict:
     """从指定折的 ``last.ckpt`` 续训，并与原最佳权重比较。
 
     原运行保持只读；新目录保存续训日志及选择结果。只有当续训后的
     macro-F1 高于原结果时才替换该折预测，其他折始终复用原预测。
     ``epochs`` 是续训后的总轮数上限，而非额外轮数。
+    迁移旧运行时可覆盖计划中失效的清单和图块路径。
     """
     source_dir = source_dir.resolve()
     if output_dir.exists():
@@ -46,7 +49,11 @@ def resume_cv_fold(source_dir: Path, output_dir: Path, *, fold_number: int,
     if len(source["fold_results"]) != len(plan["folds"]):
         raise ValueError("原运行尚未完成全部折")
 
-    _, records = read_manifest(Path(plan["source_manifest"]))
+    source_manifest = resolve_run_path(source_dir, plan["source_manifest"], split_csv)
+    packed_tiles = resolve_run_path(source_dir, plan["packed_tiles"], tiles_npy)
+    if not packed_tiles.is_file():
+        raise FileNotFoundError(packed_tiles)
+    _, records = read_manifest(source_manifest)
     folds = build_donor_folds(records, len(plan["folds"]), plan["seed"])
     fold = folds[fold_number - 1]
     if (sorted(fold.train_donors) != fold_plan["train_donors"]
@@ -88,7 +95,7 @@ def resume_cv_fold(source_dir: Path, output_dir: Path, *, fold_number: int,
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     L.seed_everything(plan["seed"], workers=True)
     train_loader, val_loader, weights = make_loaders(
-        fold_dir / "data" / "split.csv", Path(plan["packed_tiles"]),
+        fold_dir / "data" / "split.csv", packed_tiles,
         fold_dir / "data" / "train_stats.json", settings["batch_size"],
         plan["seed"], device, settings["augmentation"],
     )
@@ -134,10 +141,16 @@ def resume_cv_fold(source_dir: Path, output_dir: Path, *, fold_number: int,
                                if part["number"] == number)
         if {row["donor"] for row in rows} != expected_donors:
             raise ValueError(f"第 {number} 折的预测受试者与计划不一致")
-        results.append({**item, "checkpoint": str(selected_checkpoint),
-                        "metrics": fold_metrics(rows)} if number == fold_number else item)
+        checkpoint = (selected_checkpoint if number == fold_number else
+                      source_dir / f"fold_{number:02d}" / "training" / "checkpoints" / "best.ckpt")
+        result = {**item, "checkpoint": store_run_path(checkpoint, output_dir)}
+        if number == fold_number:
+            result["metrics"] = fold_metrics(rows)
+        results.append(result)
         all_predictions.extend(rows)
 
+    plan = {**plan, "source_manifest": store_run_path(source_manifest, output_dir),
+            "packed_tiles": store_run_path(packed_tiles, output_dir)}
     summary = summarize_predictions(plan, results, all_predictions, records)
     summary["continuation"] = {
         "source_run": str(source_dir), "fold": fold_number,

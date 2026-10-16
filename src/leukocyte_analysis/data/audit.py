@@ -13,6 +13,7 @@ from .bbbc045_config import (
     TRAIN_DONORS,
     VAL_DONORS,
 )
+from .integrity import validate_pack_provenance
 from .quality import focus_proxy
 from .split import read_manifest
 
@@ -150,6 +151,7 @@ def _inspect_tiles(
 def audit_packed_data(split_csv: Path, tiles_npy: Path) -> dict:
     """组合清单校验和图块检查，返回不修改数据的审计报告。"""
     _, records = read_manifest(split_csv)
+    validate_pack_provenance(split_csv, tiles_npy)
     counts = _validate_records(records)
     quality, percentiles, focus_screening = _inspect_tiles(records, tiles_npy)
 
