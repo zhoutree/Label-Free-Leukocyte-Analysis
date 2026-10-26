@@ -2,7 +2,7 @@
 
 基于 BBBC045 的 55×55 单通道明场图块，训练四类白细胞分类器：淋巴细胞（B＋T）、嗜酸性粒细胞、单核细胞和中性粒细胞。模型使用适配小图的 ResNet-18，从 ImageNet-1K 权重微调；按受试者划分数据，归一化统计量仅由相应训练侧计算。
 
-[查看结果图](#结果可视化) · [了解实现](#项目实现) · [运行代码](#快速运行) · [完整复现](#从零准备环境和数据)
+[查看结果图](#结果可视化) · [模型结构](#模型结构) · [数据概览](#数据示例与类别分布) · [了解实现](#项目实现) · [运行代码](#快速运行) · [完整复现](#从零准备环境和数据)
 
 ## 主要结果与边界
 
@@ -18,16 +18,16 @@
 下图来自上表的**常规训练模型**：左侧为逐轮验证 macro-F1，右侧为训练／验证的未加权交叉熵。检查点按第 44 轮的最高验证 macro-F1（0.9893）选择；右图标出**同一轮**的训练损失 0.1054 和验证损失 0.1081，并非各自曲线的最低值。实际优化目标还包含类别权重和标签平滑，不能直接把它的数值与图中的 `val_loss` 比较；图中的 F1 **不是训练集 F1，也不是测试集曲线**。
 
 <p align="center">
-  <a href="docs/assets/training_curves.png"><img src="docs/assets/training_curves.png" alt="常规训练的验证 macro-F1 及训练和验证损失曲线" width="820"></a>
+  <a href="docs/assets/training_curves.png"><img src="docs/assets/training_curves.png" alt="常规训练的原始逐轮验证 macro-F1 与未加权交叉熵，两图均标记第 44 轮及对应数值" width="960"></a>
 </p>
 
-下图是同一模型在**原保留测试受试者** CRF049、CRF066 上的计数混淆矩阵，行是真实类别，列是预测类别。单核细胞召回率为 91.16%，仍是相对弱项；该测试集已经被多次分析，不能将图称为全新独立测试结果。
+下图是同一模型在**原保留测试受试者** CRF049、CRF066 上的混淆矩阵与每类召回率。左图行是真实类别、列是预测类别，数字为计数及行内比例，颜色按行内比例映射；右图突出各类召回率。单核细胞为 536/588 正确识别，召回率 91.16%，仍是相对弱项。该测试集已经被多次分析，不能将图称为全新独立测试结果。
 
 <p align="center">
-  <a href="docs/assets/confusion_matrix_counts.png"><img src="docs/assets/confusion_matrix_counts.png" alt="原保留测试集的四类白细胞计数混淆矩阵" width="580"></a>
+  <a href="docs/assets/confusion_matrix_counts.png"><img src="docs/assets/confusion_matrix_counts.png" alt="原保留测试集的混淆矩阵，逐格标注原始计数与行内比例，并展示四类召回率，单核细胞为 91.16%" width="960"></a>
 </p>
 
-两张结果图分别来自运行 `resnet18_four_imagenet_flips_photometric_geometric_plateau_ls0.05_20261014_145319` 的 `csv/metrics.csv` 和 `test_evaluation/`；原始运行目录不随 Git 发布。训练指标也可在运行目录的 TensorBoard 日志中查看；评估时的混淆矩阵由[绘图模块](src/leukocyte_analysis/evaluation/plots.py)生成。详细分折结果与亮度局限见[实验索引](docs/experiment_index.md)。
+两张展示图根据运行 `resnet18_four_imagenet_flips_photometric_geometric_plateau_ls0.05_20261014_145319` 的原始 `csv/metrics.csv` 和 `test_evaluation/test_predictions.csv` 重新排版，曲线与计数保持原记录；原始运行目录不随 Git 发布。训练指标也可在 TensorBoard 中查看，评估入口的自动图表由[绘图模块](src/leukocyte_analysis/evaluation/plots.py)生成。详细分折结果与亮度局限见[实验索引](docs/experiment_index.md)。
 
 ## 项目实现
 
@@ -38,24 +38,26 @@
 ## 项目流程
 
 <p align="center">
-  <img src="docs/assets/workflow.svg" alt="从 BBBC045 明场原图到图块、受试者分组、三折折外评估和原保留测试集评估的项目流程" width="860">
+  <a href="docs/assets/workflow.png"><img src="docs/assets/workflow.png" alt="真实 BBBC045 明场图块按受试者隔离后，分别进入三折交叉验证和常规训练加原保留测试两条路径，展示各自的准确率与 macro-F1" width="960"></a>
 </p>
 
-两条评估路径使用不同训练流程，不能将两组结果直接当作同一模型的前后提升。每折的归一化均值、标准差和类别权重仅由该折训练图块计算；常规训练也只用原训练集计算，不让验证或测试图块参与拟合。原始 B/T 标签保留在清单中，进入四分类模型时才合并。
+[点开查看完整流程图](docs/assets/workflow.png)。图中 Macro-F1 的 98.16% 与 97.11% 分别对应正文的 0.9816 与 0.9711；网络图标为结构示意。两条路径使用不同训练流程，不能将两组结果当作同一模型的前后提升。每折的归一化均值、标准差和类别权重仅由该折训练图块计算；常规训练也只用原训练集计算，不让验证或测试图块参与拟合。原始 B/T 标签保留在清单中，进入四分类模型时才合并。
 
-下图是原始图块的缩略展示（按 B、T、嗜酸性粒、单核、中性粒细胞排列），不是模型预测结果。[点开查看完整尺寸](docs/assets/bbbc045_examples.png)。
+## 数据示例与类别分布
+
+下图按四类模型标签展示真实图块及全数据集数量，淋巴细胞由原 B/T 标签合并。示例裁自已有的[完整图块展示图](docs/assets/bbbc045_examples.png)，逐图灰度拉伸仅用于观看，不参与训练或评估。数量差异也说明了同时报告 macro-F1 与逐类召回率的必要性。
 
 <p align="center">
-  <a href="docs/assets/bbbc045_examples.png"><img src="docs/assets/bbbc045_examples.png" alt="BBBC045 明场白细胞原始图块，五行分别为 B、T、嗜酸性粒、单核和中性粒细胞" width="520"></a>
+  <a href="docs/assets/cell_examples.png"><img src="docs/assets/cell_examples.png" alt="四类真实明场细胞图块及数量：淋巴 29338、嗜酸 4042、单核 4346、中性 62379，合计 100105" width="960"></a>
 </p>
 
 ## 模型结构
 
 <p align="center">
-  <img src="docs/assets/model_architecture.svg" alt="55 乘 55 单通道图块经三乘三输入卷积、ResNet-18 残差层、全局平均池化和四分类头输出" width="860">
+  <a href="docs/assets/model_architecture.png"><img src="docs/assets/model_architecture.png" alt="适配 55×55 单通道输入的 ResNet-18：立体特征图标注四阶段张量尺寸，附 BasicBlock 残差连接及输入适配示意" width="960"></a>
 </p>
 
-残差主体使用 ImageNet-1K 预训练权重；单通道输入层和四分类头重新初始化。增强**只作用于训练图块**，验证／测试沿用同一训练侧归一化参数，不做随机扰动。实现见[模型构建](src/leukocyte_analysis/models/resnet.py)和[数据加载](src/leukocyte_analysis/training/loaders.py)。
+图中尺寸为 `C×H×W`，四个残差阶段分别输出 `64×55×55`、`128×28×28`、`256×14×14`、`512×7×7`，每阶段包含两个 BasicBlock；立体图块是结构示意。残差主体使用 ImageNet-1K 预训练权重，单通道输入卷积和四分类头重新初始化。增强**只作用于训练图块**，验证／测试沿用同一训练侧归一化参数。实现见[模型构建](src/leukocyte_analysis/models/resnet.py)和[数据加载](src/leukocyte_analysis/training/loaders.py)。
 
 ## 从零准备环境和数据
 

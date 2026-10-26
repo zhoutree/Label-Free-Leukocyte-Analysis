@@ -15,6 +15,12 @@ from leukocyte_analysis.training.cv_reports import fold_metrics
 class TestRunPaths(unittest.TestCase):
     """不访问正式数据文件，只核对路径解析规则。"""
 
+    def test_run_relative_path_for_same_and_child_directory(self) -> None:
+        """运行目录自身及子目录应保留原有的相对表示。"""
+        run_dir = Path(__file__).resolve().parent / "unused_run"
+        self.assertEqual(store_run_path(run_dir, run_dir), ".")
+        self.assertEqual(store_run_path(run_dir / "best.ckpt", run_dir), "best.ckpt")
+
     def test_moving_project_preserves_run_relative_path(self) -> None:
         """数据和运行目录一起迁移后，计划仍指向新位置。"""
         with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent) as temporary:
