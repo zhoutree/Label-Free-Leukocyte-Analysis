@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from leukocyte_analysis.training.run_paths import resolve_run_path, store_run_path
+from leukocyte_analysis.paths import PROJECT_ROOT, resolve_run_path, store_run_path
 from leukocyte_analysis.data.cv_split import DonorFold
 from leukocyte_analysis.training.cv_plan import prepare_cv_run
 from leukocyte_analysis.training.cv_reports import fold_metrics
@@ -14,6 +14,10 @@ from leukocyte_analysis.training.cv_reports import fold_metrics
 
 class TestRunPaths(unittest.TestCase):
     """不访问正式数据文件，只核对路径解析规则。"""
+
+    def test_project_root_is_independent_of_training_configuration(self) -> None:
+        """中立路径模块的默认根目录仍是项目根，不因文件迁移发生偏移。"""
+        self.assertEqual(PROJECT_ROOT, Path(__file__).resolve().parents[1])
 
     def test_run_relative_path_for_same_and_child_directory(self) -> None:
         """运行目录自身及子目录应保留原有的相对表示。"""

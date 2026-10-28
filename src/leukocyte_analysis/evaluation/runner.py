@@ -1,7 +1,6 @@
 """为保留测试集生成可复核报告；通用推理实现见 inference。"""
 
 import json
-import tempfile
 from pathlib import Path
 
 import torch
@@ -11,7 +10,8 @@ from ..data.bbbc045_config import CLASS_NAMES, TEST_DONORS
 from ..data.dataset import LeukocyteDataset
 from ..data.split import read_manifest, validate_fixed_splits
 from ..models.resnet import build_resnet18
-from .error_records import ERROR_FIELDS, misclassified_rows, write_csv
+from ..reporting import new_report, write_csv
+from .error_records import ERROR_FIELDS, misclassified_rows
 from .inference import check_checkpoint_head, load_classifier, predict
 from .metrics import classification_metrics
 from .plots import save_confusion_matrices, save_error_examples
@@ -21,15 +21,8 @@ def save_report(dataset: LeukocyteDataset, predictions: list[dict], output_dir: 
     """先在临时目录生成完整报告，成功后一次性发布。"""
     if not predictions:
         raise ValueError("没有可评估的细胞")
-    output_dir.parent.mkdir(parents=True, exist_ok=True)
-    if output_dir.exists():
-        raise FileExistsError(f"报告目录已存在，避免覆盖或重复评估：{output_dir}")
-    with tempfile.TemporaryDirectory(prefix=".evaluation-", dir=output_dir.parent) as temporary:
-        staged_dir = Path(temporary) / "report"
-        staged_dir.mkdir()
+    with new_report(output_dir, prefix=".evaluation-") as staged_dir:
         summary = _write_report(dataset, predictions, staged_dir)
-        # 同一磁盘内重命名；中途异常不会留下半成品正式报告。
-        staged_dir.rename(output_dir)
     return summary
 
 

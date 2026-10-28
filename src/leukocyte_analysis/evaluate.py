@@ -4,9 +4,7 @@ import argparse
 from pathlib import Path
 
 from .evaluation.runner import evaluate_checkpoint
-
-
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+from .paths import PROJECT_ROOT
 
 
 def parse_args() -> argparse.Namespace:

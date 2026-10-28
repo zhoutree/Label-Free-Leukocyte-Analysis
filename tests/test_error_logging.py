@@ -11,7 +11,8 @@ import torch
 from torch import nn
 
 from leukocyte_analysis.data.bbbc045_config import CLASS_NAMES
-from leukocyte_analysis.evaluation.error_records import ERROR_FIELDS, misclassified_rows, write_csv
+from leukocyte_analysis.evaluation.error_records import ERROR_FIELDS, misclassified_rows
+from leukocyte_analysis.reporting import write_csv
 from leukocyte_analysis.training.error_logging import ValidationErrorLogger
 from leukocyte_analysis.training.module import LeukocyteClassifier
 

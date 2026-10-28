@@ -51,6 +51,21 @@ def split_for_donor(donor: str) -> str:
     raise ValueError(f"未知受试者 ID：{donor}")
 
 
+def read_reference_manifest(path: Path) -> list[dict[str, str]]:
+    """读取参考拟合／校准清单，检查分组隔离并禁止原测试受试者参与。
+
+    接受常规或折内划分；excluded 仅在分组检查时视同保留测试组，
+    返回记录仍保持原始 split，不改写清单。
+    """
+    _, records = read_manifest(path)
+    summarize_split_groups([{**row, "split": "test" if row["split"] == "excluded"
+                            else row["split"]} for row in records])
+    if any(row["donor"] in TEST_DONORS and row["split"] in {"train", "val"}
+           for row in records):
+        raise ValueError("原保留测试受试者不得用于参考拟合或阈值校准")
+    return records
+
+
 def validate_fixed_splits(records: list[dict[str, str]]) -> None:
     """拒绝把固定保留的测试受试者或其他受试者放进错误数据组。"""
     for index, record in enumerate(records):

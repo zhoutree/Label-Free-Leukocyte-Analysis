@@ -1,7 +1,6 @@
 """用已完成交叉验证的检查点比较固定亮度扰动下的折外表现。"""
 
 import json
-import tempfile
 from collections import defaultdict
 from functools import partial
 from pathlib import Path
@@ -12,8 +11,8 @@ from torchvision.transforms.v2.functional import adjust_brightness
 from ..data.bbbc045_config import CLASS_NAMES, TEST_DONORS
 from ..data.dataset import LeukocyteDataset
 from ..models.resnet import build_resnet18
-from ..training.run_paths import resolve_run_path
-from .error_records import write_csv
+from ..reporting import new_report, write_csv
+from ..paths import resolve_run_path
 from .metrics import classification_metrics
 from .plots import save_brightness_comparison
 from .inference import check_checkpoint_head, load_classifier, predict
@@ -155,10 +154,7 @@ def compare_brightness(
             class_rows.extend(classes)
             donor_rows.extend(donors)
 
-    output_dir.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix=".brightness-", dir=output_dir.parent) as temporary:
-        staged = Path(temporary) / "report"
-        staged.mkdir()
+    with new_report(output_dir, prefix=".brightness-") as staged:
         write_csv(staged / "overall.csv", overall_rows, tuple(overall_rows[0]))
         write_csv(staged / "per_class_recall.csv", class_rows, tuple(class_rows[0]))
         write_csv(staged / "by_donor.csv", donor_rows, tuple(donor_rows[0]))
@@ -170,5 +166,4 @@ def compare_brightness(
             "excluded_donors": sorted(TEST_DONORS),
         }, ensure_ascii=False, indent=2), encoding="utf-8")
         save_brightness_comparison(overall_rows, class_rows, staged, CLASS_NAMES)
-        staged.rename(output_dir)
     return overall_rows

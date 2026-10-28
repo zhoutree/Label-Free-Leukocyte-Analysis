@@ -8,9 +8,10 @@ from .data.integrity import pack_metadata_path
 from .data.pack import pack_tiles, verify_pack
 from .data.split import write_split_manifest
 from .data.stats import write_train_stats
+from .paths import PROJECT_ROOT
 
 
-DEFAULT_OUTPUT_DIR = Path(__file__).resolve().parents[2] / "data/processed"
+DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "data/processed"
 
 
 def parse_args() -> argparse.Namespace:

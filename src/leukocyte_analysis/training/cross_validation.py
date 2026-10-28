@@ -22,7 +22,7 @@ from .module import (
     COSINE_MIN_LR_RATIO, COSINE_WARMUP_EPOCHS, COSINE_WARMUP_START_FACTOR,
     PLATEAU_COOLDOWN, PLATEAU_FACTOR, PLATEAU_MIN_LR_RATIO, PLATEAU_PATIENCE,
 )
-from .run_paths import resolve_run_path, store_run_path
+from ..paths import resolve_run_path, store_run_path
 
 
 def run_cross_validation(

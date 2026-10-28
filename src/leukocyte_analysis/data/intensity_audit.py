@@ -1,8 +1,6 @@
 """描述明场图块的实际亮度分布，不修改图像或模型。"""
 
-import csv
 import json
-import tempfile
 from collections import Counter, defaultdict
 from itertools import combinations
 from pathlib import Path
@@ -12,6 +10,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
+from ..reporting import new_report, write_csv
 from .bbbc045_config import TEST_DONORS, TILE_SIZE, TRAIN_DONORS, VAL_DONORS
 from .integrity import validate_pack_provenance
 from .split import read_manifest, split_for_donor
@@ -39,14 +38,6 @@ def _tile_metrics(block: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray
     flat = block.reshape(len(block), -1)
     p10, p90 = np.percentile(flat, (10, 90), axis=1)
     return flat.mean(axis=1), np.median(block[:, border], axis=1), p90 - p10
-
-
-def _write_csv(path: Path, rows: list[dict]) -> None:
-    """将非空审计记录按首行字段顺序写入暂存 CSV。"""
-    with path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
-        writer.writeheader()
-        writer.writerows(rows)
 
 
 def _summarize(rows: list[dict], keys: tuple[str, ...]) -> list[dict]:
@@ -166,18 +157,15 @@ def audit_intensity(
         "border_proxy": f"{TILE_SIZE}×{TILE_SIZE} 图块外侧 {BORDER_WIDTH} 像素环的中位数；细胞触边时并非纯背景",
         "contrast_proxy": "单图块像素 P90−P10；不等于形态学对比度",
     }
-    output_dir.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix=".intensity-", dir=output_dir.parent) as temporary:
-        staged = Path(temporary) / "report"
-        staged.mkdir()
-        _write_csv(staged / "tile_metrics.csv", tile_rows)
-        _write_csv(staged / "group_summary.csv", groups)
-        _write_csv(staged / "split_summary.csv", split_summary)
+    with new_report(output_dir, prefix=".intensity-") as staged:
+        write_csv(staged / "tile_metrics.csv", tile_rows, tuple(tile_rows[0]), overwrite=False)
+        write_csv(staged / "group_summary.csv", groups, tuple(groups[0]), overwrite=False)
+        write_csv(staged / "split_summary.csv", split_summary, tuple(split_summary[0]), overwrite=False)
         if comparisons:
-            _write_csv(staged / "within_donor_batch_pairs.csv", comparisons)
+            write_csv(staged / "within_donor_batch_pairs.csv", comparisons,
+                      tuple(comparisons[0]), overwrite=False)
             _save_plot(comparisons, staged / "largest_batch_shifts.png")
         (staged / "settings.json").write_text(
             json.dumps(settings, ensure_ascii=False, indent=2), encoding="utf-8"
         )
-        staged.rename(output_dir)
     return settings

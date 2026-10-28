@@ -4,9 +4,7 @@ import argparse
 from pathlib import Path
 
 from .data.intensity_audit import audit_intensity
-
-
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+from .paths import PROJECT_ROOT
 
 
 def main() -> None:

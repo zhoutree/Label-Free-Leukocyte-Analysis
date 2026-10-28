@@ -11,7 +11,8 @@ import torch
 from .data.bbbc045_config import CLASS_NAMES, CV_GROUP_OVERRIDES
 from .data.split import read_manifest, summarize_split_groups, validate_fixed_splits
 from .models.resnet import build_resnet18
-from .training.arguments import (DEFAULT_TRAIN_EPOCHS, PROJECT_ROOT,
+from .paths import PROJECT_ROOT
+from .training.arguments import (DEFAULT_TRAIN_EPOCHS,
                                  add_training_arguments, validate_training_arguments)
 from .training.experiment import run_training
 from .training.loaders import make_loaders

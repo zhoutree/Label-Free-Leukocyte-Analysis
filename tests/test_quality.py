@@ -9,7 +9,7 @@ from scipy.ndimage import gaussian_filter
 
 from leukocyte_analysis.data.audit import _inspect_tiles, _pixel_issue
 from leukocyte_analysis.data.bbbc045_config import SOURCE_CLASS_NAMES
-from leukocyte_analysis.data.quality import focus_proxy
+from leukocyte_analysis.data.quality import focus_measurements, focus_proxy
 
 
 class TestFocusProxy(unittest.TestCase):
@@ -33,6 +33,28 @@ class TestFocusProxy(unittest.TestCase):
         """清晰度计算拒绝非有限像素。"""
         with self.assertRaises(ValueError):
             focus_proxy(np.array([[np.nan]], dtype=np.float32))
+
+    def test_gradient_scores_detect_blur_without_rewriting_pixels(self) -> None:
+        """同一阶跃被摊宽后梯度评分下降，历史拉普拉斯口径保持一致。"""
+        sharp = np.zeros((55, 55), dtype=np.float32)
+        sharp[14:41, 14:41] = 1
+        original = sharp.copy()
+        clear = focus_measurements(sharp)
+        blurred = focus_measurements(gaussian_filter(sharp, sigma=3))
+        self.assertGreater(clear["tenengrad"], blurred["tenengrad"])
+        self.assertGreater(clear["normalized_tenengrad"], blurred["normalized_tenengrad"])
+        self.assertEqual(clear["laplacian_variance"], focus_proxy(sharp))
+        np.testing.assert_array_equal(sharp, original)
+
+    def test_normalized_gradient_handles_linear_brightness_and_constant_tiles(self) -> None:
+        """归一化评分应抵消线性灰度缩放与偏移，常数图不出现 NaN。"""
+        image = np.zeros((55, 55), dtype=np.float64)
+        image[14:41, 14:41] = 1
+        self.assertAlmostEqual(focus_measurements(image)["normalized_tenengrad"],
+                               focus_measurements(image * 0.003 + 0.002)["normalized_tenengrad"])
+        constant = focus_measurements(np.full((55, 55), 0.003))
+        self.assertEqual(constant["normalized_tenengrad"], 0.0)
+        self.assertTrue(all(np.isfinite(value) for value in constant.values()))
 
     def test_audit_uses_training_threshold_without_removing_samples(self) -> None:
         """模糊阈值只由训练图块决定，候选图块不会被自动删除。"""

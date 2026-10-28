@@ -1,9 +1,5 @@
 """把模型错分与原始 TIFF 网格坐标关联，供人工复核标签。"""
 
-import csv
-import tempfile
-from pathlib import Path
-
 from ..data.bbbc045_config import model_label
 
 
@@ -51,23 +47,3 @@ def misclassified_rows(dataset, predictions: list[dict], split: str,
             "confidence": float(prediction["confidence"]),
         })
     return rows
-
-
-def write_csv(path: Path, rows: list[dict], fields: tuple[str, ...]) -> None:
-    """即使无错分也写表头；完成后原子替换，避免留下半张表。"""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    staged = None
-    try:
-        # Windows 下先关闭临时文件，再替换目标；不嵌套临时目录。
-        with tempfile.NamedTemporaryFile(
-            mode="w", newline="", encoding="utf-8", delete=False,
-            prefix=".error-records-", suffix=".csv", dir=path.parent,
-        ) as handle:
-            staged = Path(handle.name)
-            writer = csv.DictWriter(handle, fieldnames=fields)
-            writer.writeheader()
-            writer.writerows(rows)
-        staged.replace(path)
-    finally:
-        if staged is not None:
-            staged.unlink(missing_ok=True)

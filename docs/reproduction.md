@@ -152,7 +152,72 @@ python -m leukocyte_analysis.record_errors --split test --predictions-csv "$run\
 
 记录程序拒绝覆盖已有目标文件；人工核查时不要根据测试集错分调整模型后再把同一测试集称为独立最终测试。
 
-按“从零准备环境和数据”中的 `pip install -e .` 安装后，不必设置 `PYTHONPATH`；也可使用 `leukocyte-prepare-data`、`leukocyte-train`、`leukocyte-cross-validate`、`leukocyte-evaluate`、`leukocyte-record-errors`、`leukocyte-brightness-stress` 和 `leukocyte-audit-brightness` 命令。若沿用旧环境而只需注册命令，可执行 `python -m pip install --no-deps --no-build-isolation -e .`。
+
+## 特征与质量复核
+
+此入口处理原始图块，待定判断只使用 RMD，独立检查图片质量。分类置信度仅作为结果信息保存，不参与拒识。使用当前四分类权重，不重新训练 ResNet。仅运行本文命令才会启动图块推理；训练侧和验证侧的完整前向提取仍需时间。
+
+先安装可选依赖；作者 CUDA 环境的 `environment.yml` 也包含同一固定版本：
+
+```powershell
+python -m pip install -e ".[review]"
+```
+
+使用常规训练的最佳检查点和它对应的数据三件套。下面默认读取 `data/processed/`；交叉验证检查点须显式传入同折 `--split-csv`、`--stats-json` 及对应 `--tiles-npy`，不能混用其他折的归一化或参考分布。
+
+```powershell
+$checkpoint = Read-Host "请粘贴四分类最佳检查点 best.ckpt 路径"
+python -m leukocyte_analysis.review_cells fit `
+  --checkpoint $checkpoint --known-reject-rate 0.01 `
+  --output-dir .\reports\cell_review_reference
+```
+
+`0.01` 是示例工作点：在完整已知类验证数据上，以约 1% 为误拒目标。训练侧仅拟合四类特征中心和协方差，验证侧只选择 RMD 上分位数，不更新网络参数；分数越大越偏离，**严格大于阈值**才送复核。并列分数整体保留，实测误拒可低于目标。此目标不是未知类检出率，也不保证部署时的误拒率。验证集已用于模型选择，结果仍属探索性校准。
+
+新目录输出：
+
+- `rmd.pt`：只包含张量统计量、训练归一化、类别顺序、检查点摘要与工作点；不保存额外的分类模型。
+- `validation_scores.csv`：完整验证图块的候选类别、置信度、RMD 与清晰度评分，行号可回溯原图。
+- `summary.json`：来源摘要、训练／校准数量、总体及各类误拒计数与限制。
+
+质量检查沿用中央区域、固定 `sigma=0.8` 平滑后计算拉普拉斯方差，并新增 Sobel 梯度能量 `tenengrad`。规则使用 `normalized_tenengrad`，即梯度能量除以原始中央区域灰度方差；低值表示细节少，对纯亮度偏移及线性对比度缩放更稳定，但仍受噪声、天然低纹理和成像条件影响。该归一化只用于质量评分，不修改分类模型输入；常数图评分为零，单独标记 `no_contrast`。
+
+快速原型可直接复用上一步完整验证评分校准质量下限，无需重新推理：
+
+```powershell
+python -m leukocyte_analysis.review_cells calibrate-quality `
+  --validation-scores .\reports\cell_review_reference\validation_scores.csv `
+  --split-csv .\data\processed\bbbc045_split.csv `
+  --quality-reject-rate 0.01 --output-dir .\reports\cell_quality_threshold
+```
+
+输出 `quality_threshold.json`。每类按 `floor(0.01 × 样本数)` 的顺序统计量选择下限，再取四类最小值，作为不依赖推理类别的统一阈值；严格低于阈值才拦截，并列保留。因此每类**校准数据的经验拦截比例**不超过 1%，但没有正式质量标签，不能称为实测误判废率或失焦检出率，也不保证新数据上的比例。阈值不通过最大化剩余图片的四分类 F1 选择；原始成绩不变。报告记录来源摘要、各类拦截数与限制，拒绝覆盖旧目录。
+
+`--split-csv` 必须是生成评分时使用的完整划分清单，默认是上述常规清单；折内评分应显式传入对应折的清单。程序要求评分含 `packed_index`、`donor`、`true_index`、`normalized_tenengrad`，并核对是否完整且不重复地覆盖清单验证集、受试者和标签是否一致；拒绝训练／测试索引及原保留测试受试者参与校准，CRF101 两年份也不得跨组。新参考额外保存来源清单路径和摘要；旧质量参考仍可读取，无需覆盖或重算旧结果。文件名叫“validation”本身不再作为来源证明。
+
+人工质量标注和真实失焦验证可在后续补充；模拟模糊不能代替真实失焦验证，同一原图与变体须保持同组。此工作点只是保守工程筛选，不证明被拦截图片确实不可用。
+
+对无标签图块应用：
+
+```powershell
+$incoming = Read-Host "请粘贴待复核的原始灰度图块 NPY 路径"
+python -m leukocyte_analysis.review_cells predict `
+  --checkpoint $checkpoint --reference .\reports\cell_review_reference\rmd.pt `
+  --tiles-npy $incoming --output-dir .\reports\cell_review_predictions `
+  --quality-reference .\reports\cell_quality_threshold\quality_threshold.json
+```
+
+输入必须为非空 `N×55×55 float32` 数组，保持与 BBBC045 原始灰度相同的数值单位；不能使用截图、显示拉伸图或直接把 0–255 灰度图转成 float32 冒充原输入。程序不自动缩放、裁切或更改灰度范围，跨设备输入仍需另行验证。
+
+上面的命令启用校准质量参考，低于下限标记 `unusable`，原候选类别与原图保留，原因仍是候选性质的 `severe_blur_candidate`。省略 `--quality-reference` 则不启用模糊判废；也可用 `--focus-min` 手动指定，但不能与质量参考同时使用。可选 `--focus-review-min` 是额外的质量存疑下限（此前探索值为 8.67，不是正式合格线）；它不能低于判废下限，否则程序报错。所有下限须非负，等于下限保留。报告区分验证尾部校准和未验证的手动阈值。
+
+输出 `predictions_with_review.csv`、`needs_review.csv`（包括不可用项）和 `summary.json`。所有原始候选类别仍保留；严重模糊／无灰度结构优先输出 `unusable`，特征偏离或质量存疑触发输出 `uncertain`。未设置清晰度阈值时 `quality_status=not_assessed`，不能当成质量合格证明。不可用图片不从输入中删除，也不参与偷偷重算一个更高的原模型准确率。
+
+作者当前已生成的质量参考位于 `reports/cell_quality_threshold_20261028/quality_threshold.json`，下限约 `8.060`；直接使用时，将上面命令的 `--quality-reference` 换成这个路径即可，无需重新训练或再次拟合。RMD 继续使用 `reports/cell_review_reference/rmd.pt` 中与原检查点绑定的工作点，约 `0.00149634`。这些本地产物不随 Git 分发，克隆者需按前述步骤生成自己的参考；不能仅将数值硬编码后用于其他模型或仪器。该命令是独立复核入口，不会自动改变原 `evaluate` 命令的输出。
+
+RMD 使用 [PyTorch-OOD 官方实现](https://pytorch-ood.readthedocs.io/en/stable/detectors/rmd.html)，方法依据 [RMD 原论文](https://arxiv.org/abs/2106.09022)。未知细胞可能与已知类特征重叠，成像变化也可能触发偏离；因此 `feature_outlier` 仅代表待复核原因，不是嗜碱性粒细胞或病理异常诊断。当前未提供真实未知／失焦验证成绩。原保留测试集不用于拟合参考或选阈值；更换检查点必须重新拟合，程序通过摘要拒绝混用。
+
+按“从零准备环境和数据”中的 `pip install -e .` 安装后，不必设置 `PYTHONPATH`；也可使用 `leukocyte-prepare-data`、`leukocyte-train`、`leukocyte-cross-validate`、`leukocyte-evaluate`、`leukocyte-record-errors`、`leukocyte-review-cells`、`leukocyte-brightness-stress` 和 `leukocyte-audit-brightness` 命令。若沿用旧环境而只需注册命令，可执行 `python -m pip install --no-deps --no-build-isolation -e .`。
 
 运行不依赖完整数据集的单元测试：
 

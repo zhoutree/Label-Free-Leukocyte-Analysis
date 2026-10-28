@@ -5,9 +5,7 @@ from datetime import datetime
 from pathlib import Path
 
 from .training.cv_resume import resume_cv_fold
-
-
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+from .paths import PROJECT_ROOT
 
 
 def main() -> None:

@@ -10,8 +10,8 @@ from ..evaluation.error_records import (
     ERROR_FIELDS,
     FREQUENCY_FIELDS,
     misclassified_rows,
-    write_csv,
 )
+from ..reporting import write_csv
 
 
 class ValidationErrorLogger(L.Callback):
@@ -97,4 +97,4 @@ class ValidationErrorLogger(L.Callback):
                 ),
             })
         summary.sort(key=lambda row: (-row["wrong_epochs"], row["packed_index"]))
-        write_csv(self.output_dir / "frequency.csv", summary, FREQUENCY_FIELDS)
+        write_csv(self.output_dir / "frequency.csv", summary, FREQUENCY_FIELDS, overwrite=True)

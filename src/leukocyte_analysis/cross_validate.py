@@ -6,7 +6,8 @@ from datetime import datetime
 from pathlib import Path
 
 from .training.cross_validation import continue_cross_validation, run_cross_validation
-from .training.arguments import PROJECT_ROOT, add_training_arguments, validate_training_arguments
+from .paths import PROJECT_ROOT
+from .training.arguments import add_training_arguments, validate_training_arguments
 
 
 def parse_args() -> argparse.Namespace:

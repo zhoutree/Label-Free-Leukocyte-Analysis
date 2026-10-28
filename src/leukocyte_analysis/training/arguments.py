@@ -4,10 +4,10 @@ import argparse
 import math
 from pathlib import Path
 
+from ..paths import PROJECT_ROOT
 from .loaders import AUGMENTATION_MODES
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_TRAIN_EPOCHS = 45
 DEFAULT_CV_EPOCHS = 30
 

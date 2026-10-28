@@ -1,6 +1,9 @@
-"""在运行记录中保存可迁移路径，并读取旧版绝对路径记录。"""
+"""项目默认位置及可迁移运行路径；不依赖训练、模型或评估模块。"""
 
 from pathlib import Path
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
 def store_run_path(path: Path, run_dir: Path) -> str:

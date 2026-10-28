@@ -6,7 +6,7 @@ from pathlib import Path
 from ..data.bbbc045_config import CV_GROUP_OVERRIDES, TEST_DONORS
 from ..data.cv_split import DonorFold
 from .cv_reports import fold_metrics, read_predictions
-from .run_paths import store_run_path
+from ..paths import store_run_path
 
 
 def build_cv_plan(split_csv: Path, tiles_npy: Path, folds: list[DonorFold],

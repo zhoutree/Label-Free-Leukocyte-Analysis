@@ -7,6 +7,7 @@ import numpy as np
 
 from ..data.bbbc045_config import CLASS_NAMES, TRAIN_DONORS, VAL_DONORS
 from ..evaluation.metrics import classification_metrics
+from ..reporting import write_csv
 
 
 def fold_metrics(rows: list[dict]) -> dict:
@@ -30,10 +31,7 @@ def read_predictions(path: Path) -> list[dict]:
 
 def write_predictions(path: Path, rows: list[dict]) -> None:
     """只创建新报告，拒绝覆盖已完成或正在核对的预测。"""
-    with path.open("x", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
-        writer.writeheader()
-        writer.writerows(rows)
+    write_csv(path, rows, tuple(rows[0]), overwrite=False)
 
 
 def summarize_predictions(plan: dict, results: list[dict],

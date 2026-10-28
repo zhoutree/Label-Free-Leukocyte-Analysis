@@ -15,7 +15,7 @@ from ..models.resnet import build_resnet18
 from .cv_reports import fold_metrics, read_predictions, summarize_predictions, write_predictions
 from .experiment import run_training
 from .loaders import make_loaders
-from .run_paths import resolve_run_path, store_run_path
+from ..paths import resolve_run_path, store_run_path
 
 
 def resume_cv_fold(source_dir: Path, output_dir: Path, *, fold_number: int,

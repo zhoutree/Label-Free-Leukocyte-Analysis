@@ -23,11 +23,15 @@ dependencies = [
     "scipy",
 ]
 
+[project.optional-dependencies]
+review = ["pytorch-ood==0.4.0"]
+
 [project.scripts]
 leukocyte-prepare-data = "leukocyte_analysis.prepare_data:main"
 leukocyte-train = "leukocyte_analysis.train:main"
 leukocyte-evaluate = "leukocyte_analysis.evaluate:main"
 leukocyte-record-errors = "leukocyte_analysis.record_errors:main"
+leukocyte-review-cells = "leukocyte_analysis.review_cells:main"
 leukocyte-cross-validate = "leukocyte_analysis.cross_validate:main"
 leukocyte-resume-cv = "leukocyte_analysis.resume_cv:main"
 leukocyte-brightness-stress = "leukocyte_analysis.brightness_stress:main"

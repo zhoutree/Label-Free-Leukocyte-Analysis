@@ -59,6 +59,28 @@
 
 图中尺寸为 `C×H×W`，四个残差阶段分别输出 `64×55×55`、`128×28×28`、`256×14×14`、`512×7×7`，每阶段包含两个 BasicBlock；立体图块是结构示意。残差主体使用 ImageNet-1K 预训练权重，单通道输入卷积和四分类头重新初始化。增强**只作用于训练图块**，验证／测试沿用同一训练侧归一化参数。实现见[模型构建](src/leukocyte_analysis/models/resnet.py)和[数据加载](src/leukocyte_analysis/training/loaders.py)。
 
+## 图片质量与待定复核
+
+新增可选的图块复核入口：复用原 ResNet 池化后的特征，通过 PyTorch-OOD 的 RMD 检查输入与已知四类的偏离程度；复用原拉普拉斯清晰度指标，并补充 Sobel 梯度能量与对比度归一化评分。原四分类头和训练配置不变。
+
+<p align="center">
+  <a href="docs/assets/review_workflow.png"><img src="docs/assets/review_workflow.png" alt="真实明场图块分别进入独立质量评估和冻结 ResNet-18 特征提取，再按质量优先合并为质量不合格、特征偏离待复核或四分类候选三种状态" width="960"></a>
+</p>
+
+图示为**已启用质量参考**的复核流程：质量评分与网络特征分别计算，再按质量优先合并状态；质量不合格的图块也保留网络候选结果。细胞图片来自真实 BBBC045 图块，为不同样本示例，不是同一细胞处理前后。图中阈值仅对应当前模型与参考；**待复核不等于病变，规则通过也不等于已确认细胞正常**。
+
+输出区分 `accepted`、`needs_review` 和 `unusable`，并保留原候选类别、分数和触发原因。RMD 只用训练侧拟合，完整验证侧校准已知误拒工作点；质量检查可复用验证评分校准保守下限，使每类校准图片的低清晰度拦截比例不超过 1%，显式传入质量参考后自动标记不合格，但不删除图片。该比例不是实测误判废率，默认未传入质量参考时只记录评分；常数图片单独标记为缺少灰度结构。**尚未验证真实未知细胞及严重失焦的检出能力**。安装、拟合和应用见[特征与质量复核](docs/reproduction.md#特征与质量复核)。
+
+待定判断只使用 **RMD 特征偏离**，图片清晰度独立预警；分类置信度保留在报告中供查看，不按其设置另一套拒识规则。
+
+| 输出状态 | 含义与处理 |
+| --- | --- |
+| `unusable` | 无灰度结构，或低于启用的清晰度下限；标记质量不合格，保留原图及候选类别。 |
+| `needs_review` | RMD 超过参考工作点，或触发可选质量存疑规则；标记待复核，不直接判断病变或细胞类型。 |
+| `accepted` | 未触发所启用的拦截规则，输出四分类候选；不代表已确认细胞正常。 |
+
+复核功能通过独立的 `leukocyte-review-cells predict` 命令启用，不改变原训练、四分类评估或模型权重。使用质量参考才启用低清晰度判废；RMD 待定不是新增的训练类别，也不是病变诊断功能。
+
 ## 从零准备环境和数据
 
 数据来源：[Broad Bioimage Benchmark Collection 的 BBBC045v1 官方页](https://bbbc.broadinstitute.org/BBBC045)。按官网推荐，引用本数据集时注明 “We used image set BBBC045v1, available from the Broad Bioimage Benchmark Collection [Ljosa et al., Nature Methods, 2012].” 本项目只读取官方 `BBBC045_Stained_Montages.zip` 中的 `ch5_*.tif` 明场 montage；不需要另一个 CIF 压缩包。原始目录名提供 B、T、嗜酸性粒、单核和中性粒细胞标签，模型读取时才将 B/T 合并为淋巴细胞。
@@ -129,11 +151,14 @@ src/leukocyte_analysis/
   models/                       模型结构代码
   training/                     数据加载器、Lightning 模块和实验配置
   evaluation/                   独立测试推理、指标和图像报告
+  reporting.py                  数据、训练及评估共用的报告发布与 CSV 工具
+  paths.py                      共用项目位置和运行路径解析，不依赖训练配置
   train.py                      命令行入口
   cross_validate.py             按受试者交叉验证入口
   resume_cv.py                  指定一折从 last.ckpt 续训入口
   evaluate.py                   训练完成后的测试集评估入口
   record_errors.py              从预测文件或检查点导出可定位的错分记录
+  review_cells.py               特征参考拟合与原始灰度图块的质量／待定复核
   brightness_stress.py           已训练交叉验证权重的亮度敏感性诊断入口
   audit_brightness.py            原始图块的受试者／类别／批次亮度分布入口
 data/raw/                       可选的原图解压目录（Git 忽略）
