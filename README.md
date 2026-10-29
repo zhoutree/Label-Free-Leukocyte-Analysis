@@ -81,6 +81,12 @@
 
 复核功能通过独立的 `leukocyte-review-cells predict` 命令启用，不改变原训练、四分类评估或模型权重。使用质量参考才启用低清晰度判废；RMD 待定不是新增的训练类别，也不是病变诊断功能。
 
+### 患者级 PDF 结果报告
+
+已有复核结果可导出为**每位患者一份 PDF**：参照检验报告的紧凑版式，先列样本信息及总表（四类候选、待复核、质量不合格），再逐类显示“名称／数量／占比”，下面以十列排列真实图块，自动续页。PDF 为纯结果展示，不追加表下说明或免责声明，页脚只保留患者／样本编号和页码。同一患者的不同样本分开统计；逐图索引、原候选、分数及触发原因移至同目录 `cell_details.csv`，不挤占图册。
+
+导出不重新推理；需提供图块到脱敏患者／样本编号的完整 CSV，并核对原图块包摘要。PDF 总表与类别栏统一以**该样本全部输入图块**为分母，六项互斥计数合计为输入总数；原 `accepted` 内部比例另保留在 JSON。报告不输出临床高低标记、血液绝对浓度或未训练的病变／红细胞／血小板结论。安装可选依赖 `python -m pip install -e ".[pdf]"` 后，使用 `python -m leukocyte_analysis.patient_report`；完整输入格式与命令见[患者 PDF 导出](docs/reproduction.md#患者-pdf-导出)。
+
 ## 从零准备环境和数据
 
 数据来源：[Broad Bioimage Benchmark Collection 的 BBBC045v1 官方页](https://bbbc.broadinstitute.org/BBBC045)。按官网推荐，引用本数据集时注明 “We used image set BBBC045v1, available from the Broad Bioimage Benchmark Collection [Ljosa et al., Nature Methods, 2012].” 本项目只读取官方 `BBBC045_Stained_Montages.zip` 中的 `ch5_*.tif` 明场 montage；不需要另一个 CIF 压缩包。原始目录名提供 B、T、嗜酸性粒、单核和中性粒细胞标签，模型读取时才将 B/T 合并为淋巴细胞。
@@ -159,6 +165,7 @@ src/leukocyte_analysis/
   evaluate.py                   训练完成后的测试集评估入口
   record_errors.py              从预测文件或检查点导出可定位的错分记录
   review_cells.py               特征参考拟合与原始灰度图块的质量／待定复核
+  patient_report.py             从已有复核结果导出患者级 PDF，不重新推理
   brightness_stress.py           已训练交叉验证权重的亮度敏感性诊断入口
   audit_brightness.py            原始图块的受试者／类别／批次亮度分布入口
 data/raw/                       可选的原图解压目录（Git 忽略）

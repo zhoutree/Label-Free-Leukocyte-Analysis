@@ -23,3 +23,5 @@ dependencies:
       - scipy
       # 特征空间拒识使用；原训练及 CSV 复核不依赖此可选功能。
       - pytorch-ood==0.4.0
+      # 患者级 PDF 汇总与细胞图册；不改变训练依赖。
+      - reportlab

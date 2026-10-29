@@ -12,3 +12,5 @@ data/processed/
 data/pretrained/
 reports/
 runs/
+# 患者报告与演示导出均为本地产物，避免提交身份和图像数据。
+output/pdf/

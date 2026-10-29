@@ -217,7 +217,48 @@ python -m leukocyte_analysis.review_cells predict `
 
 RMD 使用 [PyTorch-OOD 官方实现](https://pytorch-ood.readthedocs.io/en/stable/detectors/rmd.html)，方法依据 [RMD 原论文](https://arxiv.org/abs/2106.09022)。未知细胞可能与已知类特征重叠，成像变化也可能触发偏离；因此 `feature_outlier` 仅代表待复核原因，不是嗜碱性粒细胞或病理异常诊断。当前未提供真实未知／失焦验证成绩。原保留测试集不用于拟合参考或选阈值；更换检查点必须重新拟合，程序通过摘要拒绝混用。
 
-按“从零准备环境和数据”中的 `pip install -e .` 安装后，不必设置 `PYTHONPATH`；也可使用 `leukocyte-prepare-data`、`leukocyte-train`、`leukocyte-cross-validate`、`leukocyte-evaluate`、`leukocyte-record-errors`、`leukocyte-review-cells`、`leukocyte-brightness-stress` 和 `leukocyte-audit-brightness` 命令。若沿用旧环境而只需注册命令，可执行 `python -m pip install --no-deps --no-build-isolation -e .`。
+## 患者 PDF 导出
+
+此入口只读取 `review_cells predict` 已生成的 `predictions_with_review.csv` 与 `summary.json`，不加载网络，不重新推理、训练或修改阈值。不能直接用缺少复核状态的旧四分类预测表代替。安装独立的 PDF 排版依赖（无需为单独导出安装 PyTorch-OOD）：
+
+```powershell
+python -m pip install -e ".[pdf]"
+```
+
+准备 `patients.csv`，每张图块一行，完整覆盖本次输入 NPY 的全部索引。`packed_index` 是**本次输入图块包的零起始索引**，不是原始 montage 编号；不能把一个含多人的 BBBC045 包直接当成一位患者。示例：
+
+```csv
+packed_index,patient_id,sample_id,cell_id
+0,P001,S001,C001
+1,P001,S001,C002
+2,P001,S002,C001
+3,P002,S003,C001
+```
+
+`patient_id`、`sample_id` 必填，建议使用脱敏编号；`cell_id` 可省略，默认 `tile-索引`。编号最多 64 个可显示字符，不允许换行；同一 `sample_id` 只能属于一位患者，样本内 `cell_id` 不能重复。一位患者生成一份 PDF，同患者多份样本分别汇总和分组展示，不合并计算比例。
+
+```powershell
+$incoming = Read-Host "本次复核使用的原始灰度 NPY 路径"
+python -m leukocyte_analysis.patient_report `
+  --review-dir .\reports\cell_review_predictions `
+  --tiles-npy $incoming `
+  --patient-manifest .\data\processed\patients.csv `
+  --output-dir .\reports\patient_pdf
+```
+
+程序核对图块包与原复核摘要一致、患者清单与预测完整且不重复地覆盖同一包、候选编号和类别名称一致，以及决策与原策略一致。患者对应关系本身仍需由上游采集／裁切流程正确提供；哈希不能证明人为填写的患者编号正确。输出目录必须是新目录；来源检查或排版失败不发布半成品，不覆盖已有报告。
+
+输出为安全命名的 `patient_0001_摘要.pdf` 等文件，文件名不直接使用患者编号，并附 `summary.json` 记录各样本计数、比例、原策略、模型摘要和输入文件来源摘要。PDF 严格参考“先总表、再类别栏和十列图册”的结构：黑白窄表、浅灰分区，逐类列名称、数量、占比，下方连续排列 48 点方图，跨页接续；不再使用卡片或逐图长文字。四类按中性、淋巴、单核、嗜酸顺序展示，之后是待复核和质量不合格；零数量项仍列在总表，图册不留空分区。大样本不默认截断或丢弃图片。
+
+逐图明细保存为同目录 `cell_details.csv`，含 PDF 文件、类别分区、分区内顺序、图块索引、患者／样本／细胞编号、原候选、置信度、RMD、清晰度、状态和原因，便于对照图册而不增加图片间距。
+
+PDF 总表与每类栏统一以本样本**全部输入图块数**为分母，四类 accepted 候选、待复核、质量不合格六项计数互斥且合计为输入总数；显示百分比取一位小数，四舍五入后可能不恰好合计 100.0%。JSON 的 `report_rows.proportion` 使用该口径，`classes.proportion` 仍保留四类在 accepted 内部的条件比例（没有 accepted 时为 null），由元数据明确区分，不能混用。两种比例都不是血液绝对浓度或完整五分类血常规。
+
+PDF 为纯结果展示：不追加分母说明、显示处理说明、文件指引或免责声明；页脚仅有患者／样本编号及页码。这些口径和功能边界保留在本指南、`summary.json` 与 `cell_details.csv`，不改变原始评分与决策。未启用质量下限时，明细中的 `not_assessed` 不代表质量合格。RMD 待定不等于病变，`accepted` 不等于人工确认正常；报告不提供幼稚细胞、嗜碱性粒细胞、红细胞形态或血小板分析，也不照搬参考报告的临床高低标记。报告生成时间不是原图采集或模型分析时间。显示图片逐图做 1-99 百分位灰度拉伸及最近邻放大，仅为观看，不参与模型计算。
+
+中文字体会嵌入 PDF。Windows 优先使用参考报告同类的黑体、再查找微软雅黑；Linux/macOS 若无兼容字体，用 `--font-ttf` 指定支持中文、可由 ReportLab 嵌入的 TrueType 字体文件（部分 CFF/OpenType 字体不兼容）；不静默退回缺字字体。生成物保存在 Git 忽略的 `reports/` 或 `output/pdf/`，真实患者报告与映射不得上传公开仓库。
+
+按“从零准备环境和数据”中的 `pip install -e .` 安装后，不必设置 `PYTHONPATH`；也可使用 `leukocyte-prepare-data`、`leukocyte-train`、`leukocyte-cross-validate`、`leukocyte-evaluate`、`leukocyte-record-errors`、`leukocyte-review-cells`、`leukocyte-patient-report`、`leukocyte-brightness-stress` 和 `leukocyte-audit-brightness` 命令。若沿用旧环境而只需注册命令，可执行 `python -m pip install --no-deps --no-build-isolation -e .`。
 
 运行不依赖完整数据集的单元测试：
 
