@@ -25,7 +25,7 @@ dependencies = [
 
 [project.optional-dependencies]
 review = ["pytorch-ood==0.4.0"]
-pdf = ["reportlab>=4,<5"]
+pdf = ["reportlab"]
 
 [project.scripts]
 leukocyte-prepare-data = "leukocyte_analysis.prepare_data:main"

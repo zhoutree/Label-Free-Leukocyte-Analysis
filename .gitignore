@@ -4,7 +4,10 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 .pytest_cache/
+
+# 仅本地维护的协作约定与审查记录
 /AGENTS.md
+/docs/code_audit_checklist.md
 
 # 可由数据管线或训练重新生成的大文件及报告
 data/raw/

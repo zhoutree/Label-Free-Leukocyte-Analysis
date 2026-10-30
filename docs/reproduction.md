@@ -33,7 +33,7 @@ python -m leukocyte_analysis.train
 
 默认 `--lr-scheduler plateau`：验证 macro-F1 停滞时降低 AdamW 学习率，`patience=3`、`cooldown=2`、每次乘以 0.5，最低为初始学习率的 1%；与早停 `patience=15` 搭配，给降学习率后的模型留出观察时间。Lightning 每轮记录实际学习率。`--lr-scheduler cosine` 仍可选择：前 2 轮线性预热，随后按轮次余弦下降到初始值的 1%；`--lr-scheduler none` 可运行固定学习率对照，**不会叠加两种调度器**。标签平滑默认 `0.05`；可用 `--label-smoothing 0` 关闭，验证指标和 `val_loss` 不作平滑。`train_loss` 与 `train_weighted_loss` 保留未平滑口径用于旧实验对照，新增 `train_objective_loss` 显示实际优化目标。此前 Plateau 与余弦三折的折外指标十分接近，余弦并未显示稳定优势；当前命令行默认早停最小改善量为 0，与最近完成的组合配置一致。光度增强范围曾参考旧验证异常，因此同折比较属于探索性分析，不是全新独立测试。
 
-当前只提供四分类训练与评估入口；旧五分类权重即使存在，也不能直接用于四分类。早停主要减少最佳验证轮次之后的无效训练，并不保证提高最佳分数。亮度审计、增强对照与压力测试的结果和解释统一见[亮度实验汇总](bbbc045_brightness_findings.md)；测试错分及标签来源核查见[测试与标签异常记录](bbbc045_test_audit.md)。
+当前只提供四分类训练与评估入口；旧五分类权重即使存在，也不能直接用于四分类。早停主要减少最佳验证轮次之后的无效训练，并不保证提高最佳分数。亮度审计、增强对照、压力测试以及测试错分／来源核查统一见[数据异常与诊断记录](bbbc045_diagnostics.md)，本页只保留运行命令与参数口径。
 
 终端使用 Lightning 的 `RichProgressBar` 显示批次进度，并按实时窗口宽度逐级收起指标：窄窗口只保留轮次、横条和批次；中等宽度加入剩余时间及简短的 `loss`、`val_f1`；宽窗口再显示 `val_loss`。完整指标始终写入日志。极窄窗口或训练时频繁缩放仍可能造成显示残影。首次使用前，在已激活的环境中执行 `python -m pip install rich`；以后从更新后的 `environment.yml` 重建环境时会自动安装。训练时或训练后可另开终端运行：
 
@@ -45,13 +45,13 @@ tensorboard --logdir .\runs
 
 若要进行随机初始化的对照实验，使用 `python -m leukocyte_analysis.train --init random`。也可通过 `--weight-decay` 显式改变权重衰减。冒烟测试命令使用随机初始化，以免仅为检查训练流程就下载预训练权重。
 
-`environment.yml` 让 Lightning、TorchMetrics 等普通依赖由 pip 自行选择兼容版本；只固定 Python 3.14 和已验证可使用 GPU 的 PyTorch/torchvision CUDA 13.2 配对，以免重建环境时意外改为 CPU 版本。
+`environment.yml` 让 Lightning、TorchMetrics 等普通依赖由 pip 自行选择兼容版本；保留 Python 3.14、已验证可使用 GPU 的 PyTorch/torchvision CUDA 13.2 配对，以及已验证 RMD 状态接口的 PyTorch-OOD 版本限制；具体以当前依赖声明为准。不要仅为更新普通依赖而升级已经可用的训练环境。
 
 ## 按受试者交叉验证
 
 交叉验证只使用原 train＋val 的 11 个目录标识，默认分为 3 折。`CRF101_2014` 与 `CRF101_2015` 共用 CRF101 编号；官方资料未明确核实两者是否同一人，因此**今后的分折保守地把两者视为同一组**（可用分组共 10 个），绝不分放训练和验证侧。每折从 ImageNet 权重重新初始化模型，并仅用该折训练图块重算像素均值、标准差和类别权重。CRF022 正常参与交叉验证；**CRF049 和 CRF066 继续保持原测试划分**，只是为了让下一次实验与旧折外基线可比，**不是将它们认定为坏数据或错标而筛除**。折内 CSV 保留全部原行及索引，但测试受试者标为 `excluded`，不会被训练或验证数据加载器读取。旧运行的 `plan.json` 和指标仍按原分折解释，不与新分折成绩直接作受控对比。
 
-当前没有针对 `CRF049/monocyte` 的额外质量屏蔽规则；高错分率和亮度敏感性都不能证明官方标签错误。若今后决定改变受试者划分，可将 CRF049 作为一个完整受试者纳入新训练／验证方案，并从新的训练集重新计算归一化参数和类别权重；但那将是**新的数据划分**，不能与旧 11 人折外成绩直接比较，也不能再把已多次查看的 CRF049 当作未使用过的独立测试集。
+当前没有针对 `CRF049/monocyte` 的额外质量屏蔽规则；高错分率和亮度敏感性都不能证明官方标签错误。若以后研究新的划分方案，需另外设计数据配置和训练／验证流程；现有固定划分与交叉验证入口会检查 CRF049／CRF066 的保留状态，不能只改 CSV 绕过。新方案不能与历史折外成绩直接作受控比较，也不能再把已多次查看的 CRF049 当作未使用过的独立测试集。
 
 先检查第一折的两批训练和验证（不保存权重）：
 
@@ -65,7 +65,7 @@ python -m leukocyte_analysis.cross_validate --smoke-test --init random --batch-s
 python -m leukocyte_analysis.cross_validate --folds 3 --init imagenet --lr 0.0001 --epochs 30 --batch-size 128 --augmentation flips_photometric_geometric --lr-scheduler plateau --early-stopping-patience 15 --early-stopping-min-delta 0 --label-smoothing 0.05
 ```
 
-标签平滑三折实验使用已验证过的翻转＋亮度／对比度方案，不叠加本次第 1 折未带来收益的几何／模糊／噪声增强；`--early-stopping-min-delta 0` 与此前同分折 Plateau 基线保持一致。系数 0.05 是比白细胞染色 RGB 图研究中常见的 0.1 更保守的起点，**不是 BBBC045 上已验证的最优值**：
+下面保留仅翻转＋亮度／对比度、标签平滑 0.05 的**历史实验配置**，它与上面的当前默认组合不同；显式指定 `--augmentation flips_photometric` 会关闭几何／模糊／噪声增强。0.05 是已使用的实验设置，不代表已证明是 BBBC045 的通用最优值：
 
 ```powershell
 python -m leukocyte_analysis.cross_validate --folds 3 --init imagenet --lr 0.0001 --epochs 30 --batch-size 128 --augmentation flips_photometric --lr-scheduler plateau --early-stopping-patience 15 --early-stopping-min-delta 0 --label-smoothing 0.05
@@ -73,13 +73,7 @@ python -m leukocyte_analysis.cross_validate --folds 3 --init imagenet --lr 0.000
 
 不加 `--first-fold-only` 就会一次运行完整三折；`plan.json` 和检查点会保存平滑系数。比较时以三折折外准确率、macro-F1、单核细胞 precision／recall 和各受试者指标为主，不把训练损失变大或预测置信度变低本身当作退步。原测试受试者 CRF049、CRF066 仍不参与本次参数选择。
 
-最近完成的三折组合实验同时启用了统一 `0.05` 标签平滑与前述几何／模糊／噪声增强，命令如下；这也是当前三折入口的默认配置：
-
-```powershell
-python -m leukocyte_analysis.cross_validate --folds 3 --init imagenet --lr 0.0001 --epochs 30 --batch-size 128 --augmentation flips_photometric_geometric --lr-scheduler plateau --early-stopping-patience 15 --early-stopping-min-delta 0 --label-smoothing 0.05
-```
-
-这同时改变了增强和平滑两个因素，适合检验组合方案的总效果，但无法单独归因于其中一项。
+当前默认组合同时启用了统一 0.05 标签平滑与几何／模糊／噪声增强，使用本节开头的完整命令即可；主要结果见[实验索引](experiment_index.md)。组合成绩无法单独归因于其中一项改动。
 
 若想先完整评估第 1 折，再决定是否训练剩余两折，在同一命令末尾加 `--first-fold-only`。完成后会输出第 1 折的准确率、macro-F1 与结果目录；这不是三折折外成绩。确定继续时，用它打印的目录运行 `python -m leukocyte_analysis.cross_validate --continue-run "结果目录"`：程序按保存的 `plan.json` 复用同一划分和训练配置，只训练第 2、3 折，最后生成完整 `summary.json`。不要改动第一折的目录或把 `--smoke-test` 当作完整训练；若某折训练中途被打断，程序不会覆盖该折已有文件。
 
@@ -112,7 +106,7 @@ python -m leukocyte_analysis.brightness_stress `
 
 默认将每折验证图块的原始灰度值分别乘以 0.8、1.0、1.2，随后使用**该折训练集**统计量归一化；1.0 保持原始推理路径。工具会核对两次运行的受试者分折和其他训练参数一致，并拒绝把 CRF049/CRF066 纳入诊断。输出 `overall.csv`、`per_class_recall.csv`、`by_donor.csv`、两张曲线图和设置记录。报告目录必须不存在，避免覆盖既有结果。此测试只衡量既有验证集上的亮度敏感性：亮度区间和增强方案都曾参考验证异常，结果仍是**探索性证据**，不是全新独立测试；若 1.0 的指标与各次运行的 `summary.json` 明显不同，应先核对数据与检查点版本。
 
-为判断 ±20% 扰动是否贴近实际采集差异，可先做**只读的真实亮度分布审计**。默认只统计交叉验证的 11 名受试者，不读取 CRF049/CRF066：
+为判断 ±20% 扰动是否贴近实际采集差异，可先做**只读的真实亮度分布审计**。默认只统计原 train＋val 的 11 个目录标识，CRF101 两年份在当前划分中视为同组；不将 CRF049/CRF066 纳入默认审计：
 
 ```powershell
 python -m leukocyte_analysis.audit_brightness
@@ -211,13 +205,15 @@ python -m leukocyte_analysis.review_cells predict `
 
 上面的命令启用校准质量参考，低于下限标记 `unusable`，原候选类别与原图保留，原因仍是候选性质的 `severe_blur_candidate`。省略 `--quality-reference` 则不启用模糊判废；也可用 `--focus-min` 手动指定，但不能与质量参考同时使用。可选 `--focus-review-min` 是额外的质量存疑下限（此前探索值为 8.67，不是正式合格线）；它不能低于判废下限，否则程序报错。所有下限须非负，等于下限保留。报告区分验证尾部校准和未验证的手动阈值。
 
-输出 `predictions_with_review.csv`、`needs_review.csv`（包括不可用项）和 `summary.json`。所有原始候选类别仍保留；严重模糊／无灰度结构优先输出 `unusable`，特征偏离或质量存疑触发输出 `uncertain`。未设置清晰度阈值时 `quality_status=not_assessed`，不能当成质量合格证明。不可用图片不从输入中删除，也不参与偷偷重算一个更高的原模型准确率。
+输出 `predictions_with_review.csv`、`needs_review.csv`（包括不可用项）和 `summary.json`。CSV 的 `decision` 为 `accepted`、`needs_review` 或 `unusable`，与 README 状态表一致；另一个字段 `decision_label` 在通过时保留四类候选标签，待复核时为 `uncertain`，不可用时为 `unusable`，不要将它与处理状态混用。原始候选类别始终另外保留。非恒定图像在未设置清晰度阈值时记录 `quality_status=not_assessed`；恒定图像仍会因缺少灰度结构标记为不可用。不可用图片不从输入中删除，也不用于重新计算一个更高的原模型准确率。
 
 作者当前已生成的质量参考位于 `reports/cell_quality_threshold_20261028/quality_threshold.json`，下限约 `8.060`；直接使用时，将上面命令的 `--quality-reference` 换成这个路径即可，无需重新训练或再次拟合。RMD 继续使用 `reports/cell_review_reference/rmd.pt` 中与原检查点绑定的工作点，约 `0.00149634`。这些本地产物不随 Git 分发，克隆者需按前述步骤生成自己的参考；不能仅将数值硬编码后用于其他模型或仪器。该命令是独立复核入口，不会自动改变原 `evaluate` 命令的输出。
 
 RMD 使用 [PyTorch-OOD 官方实现](https://pytorch-ood.readthedocs.io/en/stable/detectors/rmd.html)，方法依据 [RMD 原论文](https://arxiv.org/abs/2106.09022)。未知细胞可能与已知类特征重叠，成像变化也可能触发偏离；因此 `feature_outlier` 仅代表待复核原因，不是嗜碱性粒细胞或病理异常诊断。当前未提供真实未知／失焦验证成绩。原保留测试集不用于拟合参考或选阈值；更换检查点必须重新拟合，程序通过摘要拒绝混用。
 
 ## 患者 PDF 导出
+
+无需数据或模型即可[查看公开演示 PDF（2 页）](assets/patient_report_demo.pdf)；首页与续页预览见[README 报告样例](../README.md#患者级-pdf-结果报告)。该文件使用按展示配额选取的 BBBC045 真实图块和 DEMO 编号，仅展示输出版式，不是实际患者数据或总体评估结果。下面说明如何从自己的已有复核结果导出。
 
 此入口只读取 `review_cells predict` 已生成的 `predictions_with_review.csv` 与 `summary.json`，不加载网络，不重新推理、训练或修改阈值。不能直接用缺少复核状态的旧四分类预测表代替。安装独立的 PDF 排版依赖（无需为单独导出安装 PyTorch-OOD）：
 
